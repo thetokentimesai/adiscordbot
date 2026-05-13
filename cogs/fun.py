@@ -71,7 +71,7 @@ _SUS_MESSAGES = {
 }
 
 def _sus_message(percent: int) -> str:
-    for (lo, hi), msg in _sus_messages := _SUS_MESSAGES.items():
+    for (lo, hi), msg in _SUS_MESSAGES.items():
         if lo <= percent < hi:
             return msg
     return "???"
