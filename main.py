@@ -1,4 +1,6 @@
 import discord
+from discord.ext import commands
+
 import logging
 
 import config
@@ -10,8 +12,10 @@ intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
-bot = discord.Bot(intents=intents)
-
+bot = commands.Bot(
+    command_prefix=".",
+    intents=intents
+)
 
 @bot.event
 async def on_ready():
@@ -22,14 +26,6 @@ async def on_ready():
         print("Database initialized.")
     except Exception as e:
         print(f"Database init error: {e}")
-
-    try:
-        synced = await bot.sync_commands(
-            guild_ids=[config.ALLOWED_GUILD_ID]
-        )
-        print(f"Synced {len(synced)} commands.")
-    except Exception as e:
-        print(f"Command sync error: {e}")
 
 
 COGS = [

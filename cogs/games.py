@@ -1,7 +1,7 @@
 """
 cogs/games.py – Gambling commands and interactive Blackjack.
 
-Commands: /coinflip, /slots, /dice, /blackjack
+Commands: .coinflip, .slots, .dice, .blackjack
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class BlackjackView(discord.ui.View):
         super().__init__(timeout=60)
         self.game      = game
         self.player    = player
-        self.wallet    = wallet       # wallet at game start (for double validation)
+        self.wallet    = wallet
         self.message: Optional[discord.Message] = None
         self._ended    = False
 
@@ -120,23 +120,20 @@ class BlackjackView(discord.ui.View):
 
     @discord.ui.button(label="Double", style=discord.ButtonStyle.danger, emoji="💥")
     async def double_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        # Can only double on the first two cards
         if len(self.game.player_cards) != 2:
             await interaction.response.send_message(
                 "You can only double on your first two cards!", ephemeral=True
             )
             return
 
-        # Check wallet funds for extra bet
         row = await db.get_user(self.player.id)
-        extra = min(self.game.bet, row["wallet"])   # cap to available funds
+        extra = min(self.game.bet, row["wallet"])
         if extra <= 0:
             await interaction.response.send_message(
                 "Not enough coins to double!", ephemeral=True
             )
             return
 
-        # Deduct extra bet immediately then play out
         await db.add_wallet(self.player.id, -extra, reason="blackjack double extra bet")
         self.game.double_down(extra)
 
@@ -152,7 +149,6 @@ class BlackjackView(discord.ui.View):
 # ── Blackjack embed builders ───────────────────────────────────────────────────
 
 def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
-    """Embed shown while the game is in progress (dealer shows only one card)."""
     embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
     embed.add_field(
         name=f"Your hand  ({game.player_total})",
@@ -175,7 +171,6 @@ def _bj_embed(
     doubled: bool = False,
     timed_out: bool = False,
 ) -> discord.Embed:
-    """Final embed shown when the game ends."""
     labels = {
         Outcome.PLAYER_WIN: ("✅  You Win!", config.COLOR_SUCCESS),
         Outcome.DEALER_WIN: ("❌  Dealer Wins!", config.COLOR_ERROR),
@@ -213,28 +208,26 @@ def _bj_embed(
 class Games(commands.Cog):
     """Gambling and interactive game commands."""
 
-    def __init__(self, bot: discord.Bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
     def _check_gamble_cooldown(self, user_id: int) -> Optional[str]:
-        """Return an error string if the user is on cooldown, else None."""
         if is_on_cooldown(user_id, "gamble"):
             remaining = get_remaining(user_id, "gamble")
             return f"Slow down! Wait **{format_remaining(remaining)}** before gambling again."
         return None
 
-    # ── /coinflip ──────────────────────────────────────────────────────────────
+    # ── .coinflip ──────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="coinflip", description="Flip a coin and bet on the outcome.")
-    async def coinflip(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(int, "Amount to bet", required=True, min_value=1),
-        side: discord.Option(str, "heads or tails", choices=["heads", "tails"], required=True),
-    ):
+    @commands.command(name="coinflip", aliases=["cf"], help="Flip a coin and bet on the outcome. Usage: .coinflip <amount> <heads|tails>")
+    async def coinflip(self, ctx: commands.Context, amount: int = None, side: str = None):
+        if amount is None or side is None or side.lower() not in ("heads", "tails"):
+            return await ctx.send(embed=error_embed("Usage: `.coinflip <amount> <heads|tails>`"))
+
+        side = side.lower()
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
-            return await ctx.respond(embed=error_embed(msg), ephemeral=True)
+            return await ctx.send(embed=error_embed(msg))
 
         row = await db.get_user(user_id)
         if not await validate_bet(ctx, amount, row["wallet"]):
@@ -262,19 +255,18 @@ class Games(commands.Cog):
         embed.set_footer(text=f"You bet: {side.capitalize()}  |  Result: {result.capitalize()}")
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
         await db.add_xp(user_id, config.XP_PER_COMMAND)
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /slots ─────────────────────────────────────────────────────────────────
+    # ── .slots ─────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="slots", description="Spin the slot machine!")
-    async def slots(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(int, "Amount to bet", required=True, min_value=1),
-    ):
+    @commands.command(name="slots", help="Spin the slot machine! Usage: .slots <amount>")
+    async def slots(self, ctx: commands.Context, amount: int = None):
+        if amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.slots <amount>`"))
+
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
-            return await ctx.respond(embed=error_embed(msg), ephemeral=True)
+            return await ctx.send(embed=error_embed(msg))
 
         row = await db.get_user(user_id)
         if not await validate_bet(ctx, amount, row["wallet"]):
@@ -284,7 +276,7 @@ class Games(commands.Cog):
         reel_display = " | ".join(reels)
 
         if multiplier > 0:
-            winnings = int(amount * multiplier) - amount   # net gain
+            winnings = int(amount * multiplier) - amount
             await db.add_wallet(user_id, winnings, reason="slots win")
             embed = discord.Embed(
                 title=f"🎰  [ {reel_display} ]",
@@ -305,19 +297,18 @@ class Games(commands.Cog):
         embed.set_footer(text=f"Bet: {fmt(amount)}")
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
         await db.add_xp(user_id, config.XP_PER_COMMAND)
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /dice ──────────────────────────────────────────────────────────────────
+    # ── .dice ──────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="dice", description="Roll a dice against the bot.")
-    async def dice(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(int, "Amount to bet", required=True, min_value=1),
-    ):
+    @commands.command(name="dice", help="Roll a dice against the bot. Usage: .dice <amount>")
+    async def dice(self, ctx: commands.Context, amount: int = None):
+        if amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.dice <amount>`"))
+
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
-            return await ctx.respond(embed=error_embed(msg), ephemeral=True)
+            return await ctx.send(embed=error_embed(msg))
 
         row = await db.get_user(user_id)
         if not await validate_bet(ctx, amount, row["wallet"]):
@@ -342,45 +333,42 @@ class Games(commands.Cog):
 
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
         await db.add_xp(user_id, config.XP_PER_COMMAND)
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /blackjack ─────────────────────────────────────────────────────────────
+    # ── .blackjack ─────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="blackjack", description="Play interactive Blackjack!")
-    async def blackjack(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(int, "Amount to bet", required=True, min_value=1),
-    ):
+    @commands.command(name="blackjack", aliases=["bj"], help="Play interactive Blackjack! Usage: .blackjack <amount>")
+    async def blackjack(self, ctx: commands.Context, amount: int = None):
+        if amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.blackjack <amount>`"))
+
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
-            return await ctx.respond(embed=error_embed(msg), ephemeral=True)
+            return await ctx.send(embed=error_embed(msg))
 
         row = await db.get_user(user_id)
         if not await validate_bet(ctx, amount, row["wallet"]):
             return
 
-        # Deduct the bet upfront; wins/losses adjust from here
         await db.add_wallet(user_id, -amount, reason="blackjack bet placed")
 
         game = BlackjackGame(bet=amount)
         game.deal_initial()
 
-        # Instant blackjack check
         if game.is_natural_blackjack:
             payout = int(amount * 1.5)
             await db.add_wallet(user_id, amount + payout, reason="blackjack natural")
             embed = _bj_embed(game, Outcome.BLACKJACK, payout)
-            return await ctx.respond(embed=embed)
+            return await ctx.send(embed=embed)
 
         view = BlackjackView(game=game, player=ctx.author, wallet=row["wallet"] - amount)
         embed = _bj_embed_playing(game)
 
-        await ctx.respond(embed=embed, view=view)
-        view.message = await ctx.interaction.original_response()
+        msg = await ctx.send(embed=embed, view=view)
+        view.message = msg
 
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
 
 
-def setup(bot: discord.Bot) -> None:
+def setup(bot: commands.Bot) -> None:
     bot.add_cog(Games(bot))

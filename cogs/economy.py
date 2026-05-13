@@ -1,7 +1,7 @@
 """
 cogs/economy.py – Core economy commands.
 
-Commands: /balance, /daily, /deposit, /withdraw, /pay
+Commands: .balance, .daily, .deposit, .withdraw, .pay
 """
 
 from __future__ import annotations
@@ -21,17 +21,13 @@ from utils.economy_utils import fmt, error_embed, success_embed
 class Economy(commands.Cog):
     """Wallet, bank, and daily reward commands."""
 
-    def __init__(self, bot: discord.Bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    # ── /balance ───────────────────────────────────────────────────────────────
+    # ── .balance ───────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="balance", description="Check your (or another user's) balance.")
-    async def balance(
-        self,
-        ctx: discord.ApplicationContext,
-        user: discord.Option(discord.Member, "User to check", required=False) = None,
-    ):
+    @commands.command(name="balance", aliases=["bal"], help="Check your (or another user's) balance.")
+    async def balance(self, ctx: commands.Context, user: discord.Member = None):
         target = user or ctx.author
         row = await db.get_user(target.id)
 
@@ -46,12 +42,12 @@ class Economy(commands.Cog):
         embed.add_field(name="⭐ Level",  value=str(row["level"]),  inline=True)
         embed.add_field(name="✨ XP",     value=f"{row['xp']:,}",   inline=True)
         embed.set_thumbnail(url=target.display_avatar.url)
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /daily ─────────────────────────────────────────────────────────────────
+    # ── .daily ─────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="daily", description="Claim your daily reward!")
-    async def daily(self, ctx: discord.ApplicationContext):
+    @commands.command(name="daily", help="Claim your daily reward!")
+    async def daily(self, ctx: commands.Context):
         user_id = ctx.author.id
         can_claim, remaining = await check_daily_cooldown(user_id)
 
@@ -60,7 +56,7 @@ class Economy(commands.Cog):
                 f"You already claimed your daily!\n"
                 f"Come back in **{format_remaining(remaining)}**."
             )
-            return await ctx.respond(embed=embed, ephemeral=True)
+            return await ctx.send(embed=embed)
 
         reward = random.randint(config.DAILY_MIN, config.DAILY_MAX)
         now_iso = datetime.now(tz=timezone.utc).isoformat()
@@ -76,34 +72,31 @@ class Economy(commands.Cog):
             f"New wallet balance: {fmt(row['wallet'])}",
         )
         embed.set_footer(text=f"Come back in {config.DAILY_COOLDOWN_HOURS} hours.")
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /deposit ───────────────────────────────────────────────────────────────
+    # ── .deposit ───────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="deposit", description="Deposit coins from wallet to bank.")
-    async def deposit(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(str, "Amount to deposit (or 'all')", required=True),
-    ):
+    @commands.command(name="deposit", aliases=["dep"], help="Deposit coins from wallet to bank.")
+    async def deposit(self, ctx: commands.Context, amount: str = None):
+        if amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.deposit <amount|all>`"))
+
         user_id = ctx.author.id
         row = await db.get_user(user_id)
 
-        # Resolve 'all'
         if amount.lower() == "all":
             coins = row["wallet"]
         else:
             if not amount.isdigit():
-                return await ctx.respond(embed=error_embed("Amount must be a number or `all`."), ephemeral=True)
+                return await ctx.send(embed=error_embed("Amount must be a number or `all`."))
             coins = int(amount)
 
         if coins <= 0:
-            return await ctx.respond(embed=error_embed("You have nothing to deposit."), ephemeral=True)
+            return await ctx.send(embed=error_embed("You have nothing to deposit."))
 
         if coins > row["wallet"]:
-            return await ctx.respond(
+            return await ctx.send(
                 embed=error_embed(f"You only have {fmt(row['wallet'])} in your wallet."),
-                ephemeral=True,
             )
 
         await db.execute(
@@ -117,16 +110,15 @@ class Economy(commands.Cog):
             f"Deposited **{fmt(coins)}** into your bank.\n\n"
             f"Wallet: {fmt(row['wallet'])}  |  Bank: {fmt(row['bank'])}",
         )
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /withdraw ──────────────────────────────────────────────────────────────
+    # ── .withdraw ──────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="withdraw", description="Withdraw coins from bank to wallet.")
-    async def withdraw(
-        self,
-        ctx: discord.ApplicationContext,
-        amount: discord.Option(str, "Amount to withdraw (or 'all')", required=True),
-    ):
+    @commands.command(name="withdraw", aliases=["with"], help="Withdraw coins from bank to wallet.")
+    async def withdraw(self, ctx: commands.Context, amount: str = None):
+        if amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.withdraw <amount|all>`"))
+
         user_id = ctx.author.id
         row = await db.get_user(user_id)
 
@@ -134,16 +126,15 @@ class Economy(commands.Cog):
             coins = row["bank"]
         else:
             if not amount.isdigit():
-                return await ctx.respond(embed=error_embed("Amount must be a number or `all`."), ephemeral=True)
+                return await ctx.send(embed=error_embed("Amount must be a number or `all`."))
             coins = int(amount)
 
         if coins <= 0:
-            return await ctx.respond(embed=error_embed("You have nothing to withdraw."), ephemeral=True)
+            return await ctx.send(embed=error_embed("You have nothing to withdraw."))
 
         if coins > row["bank"]:
-            return await ctx.respond(
+            return await ctx.send(
                 embed=error_embed(f"You only have {fmt(row['bank'])} in your bank."),
-                ephemeral=True,
             )
 
         await db.execute(
@@ -157,33 +148,33 @@ class Economy(commands.Cog):
             f"Withdrew **{fmt(coins)}** to your wallet.\n\n"
             f"Wallet: {fmt(row['wallet'])}  |  Bank: {fmt(row['bank'])}",
         )
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /pay ───────────────────────────────────────────────────────────────────
+    # ── .pay ───────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="pay", description="Pay another user from your wallet.")
-    async def pay(
-        self,
-        ctx: discord.ApplicationContext,
-        recipient: discord.Option(discord.Member, "Who to pay", required=True),
-        amount: discord.Option(int, "Amount to pay", required=True, min_value=1),
-    ):
+    @commands.command(name="pay", help="Pay another user from your wallet.")
+    async def pay(self, ctx: commands.Context, recipient: discord.Member = None, amount: int = None):
+        if recipient is None or amount is None:
+            return await ctx.send(embed=error_embed("Usage: `.pay <@user> <amount>`"))
+
         sender_id    = ctx.author.id
         recipient_id = recipient.id
 
         if recipient_id == sender_id:
-            return await ctx.respond(embed=error_embed("You can't pay yourself."), ephemeral=True)
+            return await ctx.send(embed=error_embed("You can't pay yourself."))
 
         if recipient.bot:
-            return await ctx.respond(embed=error_embed("You can't pay a bot."), ephemeral=True)
+            return await ctx.send(embed=error_embed("You can't pay a bot."))
+
+        if amount < 1:
+            return await ctx.send(embed=error_embed("Amount must be at least 1."))
 
         sender_row = await db.get_user(sender_id)
         if amount > sender_row["wallet"]:
-            return await ctx.respond(
+            return await ctx.send(
                 embed=error_embed(
                     f"You only have {fmt(sender_row['wallet'])} in your wallet."
                 ),
-                ephemeral=True,
             )
 
         await db.add_wallet(sender_id,    -amount, reason=f"paid {recipient_id}")
@@ -193,8 +184,8 @@ class Economy(commands.Cog):
             "💸  Payment Sent",
             f"{ctx.author.mention} paid {recipient.mention} **{fmt(amount)}**!",
         )
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
 
-def setup(bot: discord.Bot) -> None:
+def setup(bot: commands.Bot) -> None:
     bot.add_cog(Economy(bot))

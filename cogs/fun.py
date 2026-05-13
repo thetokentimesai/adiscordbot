@@ -1,7 +1,7 @@
 """
 cogs/fun.py – Fun percentage commands with deterministic weekly RNG.
 
-Commands: /gaybar, /ship, /susmeter, /nerdrate
+Commands: .gaybar, .ship, .susmeter, .nerdrate
 """
 
 from __future__ import annotations
@@ -97,17 +97,13 @@ def _nerd_message(percent: int) -> str:
 class Fun(commands.Cog):
     """Weekly deterministic fun commands."""
 
-    def __init__(self, bot: discord.Bot) -> None:
+    def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
 
-    # ── /gaybar ────────────────────────────────────────────────────────────────
+    # ── .gaybar ────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="gaybar", description="Check someone's gay % this week 🌈")
-    async def gaybar(
-        self,
-        ctx: discord.ApplicationContext,
-        user: discord.Option(discord.Member, "Who to check", required=False) = None,
-    ):
+    @commands.command(name="gaybar", help="Check someone's gay % this week 🌈")
+    async def gaybar(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = gaybar_percent(target.id)
 
@@ -121,16 +117,12 @@ class Fun(commands.Cog):
         )
         embed.set_thumbnail(url=target.display_avatar.url)
         embed.set_footer(text="Resets every Monday 00:00 UTC")
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /susmeter ──────────────────────────────────────────────────────────────
+    # ── .susmeter ──────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="susmeter", description="How sus is this person? 📣")
-    async def susmeter(
-        self,
-        ctx: discord.ApplicationContext,
-        user: discord.Option(discord.Member, "Who to check", required=False) = None,
-    ):
+    @commands.command(name="susmeter", help="How sus is this person? 📣")
+    async def susmeter(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = susmeter_percent(target.id)
 
@@ -144,16 +136,12 @@ class Fun(commands.Cog):
         )
         embed.set_thumbnail(url=target.display_avatar.url)
         embed.set_footer(text="Resets every Monday 00:00 UTC")
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /nerdrate ──────────────────────────────────────────────────────────────
+    # ── .nerdrate ──────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="nerdrate", description="How nerdy is this person? 🤓")
-    async def nerdrate(
-        self,
-        ctx: discord.ApplicationContext,
-        user: discord.Option(discord.Member, "Who to check", required=False) = None,
-    ):
+    @commands.command(name="nerdrate", help="How nerdy is this person? 🤓")
+    async def nerdrate(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = nerdrate_percent(target.id)
 
@@ -167,49 +155,40 @@ class Fun(commands.Cog):
         )
         embed.set_thumbnail(url=target.display_avatar.url)
         embed.set_footer(text="Resets every Monday 00:00 UTC")
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
-    # ── /ship ──────────────────────────────────────────────────────────────────
+    # ── .ship ──────────────────────────────────────────────────────────────────
 
-    @discord.slash_command(name="ship", description="Check the compatibility of two users 💞")
-    async def ship(
-        self,
-        ctx: discord.ApplicationContext,
-        user1: discord.Option(discord.Member, "First user", required=True),
-        user2: discord.Option(discord.Member, "Second user", required=True),
-    ):
+    @commands.command(name="ship", help="Check the compatibility of two users 💞")
+    async def ship(self, ctx: commands.Context, user1: discord.Member = None, user2: discord.Member = None):
+        if user1 is None or user2 is None:
+            return await ctx.send(embed=discord.Embed(
+                description="❌  Usage: `.ship <@user1> <@user2>`",
+                color=config.COLOR_ERROR,
+            ))
+
         if user1.id == user2.id:
-            embed = discord.Embed(
+            return await ctx.send(embed=discord.Embed(
                 description="You can't ship someone with themselves! 😂",
                 color=config.COLOR_ERROR,
-            )
-            return await ctx.respond(embed=embed, ephemeral=True)
+            ))
 
         percent   = ship_percent(user1.id, user2.id)
         ship_name = _ship_name(user1.display_name, user2.display_name)
         message   = _ship_message(percent)
 
-        # Heart colour based on percent
         heart = "💔" if percent < 30 else ("❤️" if percent < 70 else "💖")
 
         embed = discord.Embed(
             title=f"{heart}  Ship: {user1.display_name} & {user2.display_name}",
             color=config.COLOR_PURPLE,
         )
-        embed.add_field(
-            name="Ship Name",
-            value=f"**{ship_name}**",
-            inline=False,
-        )
-        embed.add_field(
-            name="Compatibility",
-            value=f"{_bar(percent)}  **{percent}%**",
-            inline=False,
-        )
-        embed.add_field(name="Verdict", value=message, inline=False)
+        embed.add_field(name="Ship Name",     value=f"**{ship_name}**",               inline=False)
+        embed.add_field(name="Compatibility", value=f"{_bar(percent)}  **{percent}%**", inline=False)
+        embed.add_field(name="Verdict",       value=message,                           inline=False)
         embed.set_footer(text="Resets every Monday 00:00 UTC")
-        await ctx.respond(embed=embed)
+        await ctx.send(embed=embed)
 
 
-def setup(bot: discord.Bot) -> None:
+def setup(bot: commands.Bot) -> None:
     bot.add_cog(Fun(bot))
