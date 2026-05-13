@@ -17,8 +17,9 @@ DB_PATH = Path(__file__).parent / "economy.db"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 # Module-level connection (re-used across calls)
-_conn: sqlite3.Connection | None = None
-
+# _conn: sqlite3.Connection | None = None
+from typing import Optional
+_conn: Optional[sqlite3.Connection] = None
 
 # ── Initialisation ─────────────────────────────────────────────────────────────
 
