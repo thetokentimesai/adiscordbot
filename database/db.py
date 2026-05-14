@@ -3,7 +3,6 @@ database/db.py – Async PostgreSQL wrapper using asyncpg.
 Connects to Aiven PostgreSQL via DATABASE_URL environment variable.
 """
 
-import asyncio
 import asyncpg
 import logging
 from typing import Optional
@@ -24,9 +23,9 @@ async def _get_pool() -> asyncpg.Pool:
     return _pool
 
 
-def init_db() -> None:
-    """Create tables — called once at bot startup (runs the async version)."""
-    asyncio.get_event_loop().run_until_complete(_init_db_async())
+async def init_db() -> None:
+    """Create tables — called once at bot startup."""
+    await _init_db_async()
 
 
 async def _init_db_async() -> None:
