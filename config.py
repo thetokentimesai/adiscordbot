@@ -14,10 +14,8 @@ DISCORD_TOKEN: str = os.environ["DISCORD_TOKEN"]
 # ── Guild restriction ──────────────────────────────────────────────────────────
 ALLOWED_GUILD_ID: int = int(os.environ["ALLOWED_GUILD_ID"])
 
-# ── Economy settings ───────────────────────────────────────────────────────────
-DAILY_MIN: int = 200          # minimum daily reward
-DAILY_MAX: int = 800          # maximum daily reward
-DAILY_COOLDOWN_HOURS: int = 22  # hours before /daily resets
+# ── Database ───────────────────────────────────────────────────────────────────
+DATABASE_URL: str = os.environ["DATABASE_URL"]
 
 # ── Currency display ───────────────────────────────────────────────────────────
 CURRENCY_SYMBOL: str = "🪙"
@@ -28,8 +26,28 @@ MIN_BET: int = 10
 MAX_BET: int = 50_000
 
 # ── Level XP thresholds ────────────────────────────────────────────────────────
-XP_PER_LEVEL: int = 500       # XP needed per level
-XP_PER_COMMAND: int = 10      # XP awarded per economy command use
+XP_PER_LEVEL: int = 500
+XP_PER_COMMAND: int = 10
+
+# ── Daily reward ───────────────────────────────────────────────────────────────
+DAILY_MIN: int = 200
+DAILY_MAX: int = 800
+DAILY_COOLDOWN_HOURS: int = 22
+
+# ── Hourly reward ──────────────────────────────────────────────────────────────
+HOURLY_MIN: int = 50
+HOURLY_MAX: int = 150
+HOURLY_COOLDOWN_MINUTES: int = 60
+
+# ── Work reward ────────────────────────────────────────────────────────────────
+WORK_MIN: int = 100
+WORK_MAX: int = 300
+WORK_COOLDOWN_MINUTES: int = 30
+
+# ── Side quest reward ──────────────────────────────────────────────────────────
+SIDEQUEST_MIN: int = 300
+SIDEQUEST_MAX: int = 700
+SIDEQUEST_COOLDOWN_HOURS: int = 6
 
 # ── Embed colours ─────────────────────────────────────────────────────────────
 COLOR_SUCCESS: int = 0x2ECC71

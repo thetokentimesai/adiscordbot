@@ -301,7 +301,7 @@ class Games(commands.Cog):
 
     # ── .dice ──────────────────────────────────────────────────────────────────
 
-    @commands.command(name="dice", help="Roll a dice against the bot. Usage: .dice <amount>")
+    @commands.command(name="dice", aliases=["dc"], help="Roll a dice against the bot. Usage: .dice <amount>")
     async def dice(self, ctx: commands.Context, amount: int = None):
         if amount is None:
             return await ctx.send(embed=error_embed("Usage: `.dice <amount>`"))

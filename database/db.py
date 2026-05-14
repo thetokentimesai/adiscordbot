@@ -34,14 +34,23 @@ async def _init_db_async() -> None:
     async with pool.acquire() as conn:
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id     BIGINT PRIMARY KEY,
-                wallet      BIGINT NOT NULL DEFAULT 0,
-                bank        BIGINT NOT NULL DEFAULT 0,
-                last_daily  TEXT,
-                xp          BIGINT NOT NULL DEFAULT 0,
-                level       INTEGER NOT NULL DEFAULT 1
+                user_id        BIGINT PRIMARY KEY,
+                wallet         BIGINT NOT NULL DEFAULT 0,
+                bank           BIGINT NOT NULL DEFAULT 0,
+                last_daily     TEXT,
+                last_hourly    TEXT,
+                last_work      TEXT,
+                last_sidequest TEXT,
+                xp             BIGINT NOT NULL DEFAULT 0,
+                level          INTEGER NOT NULL DEFAULT 1
             )
         """)
+        # Add new columns if upgrading from an older schema
+        for col in ("last_hourly", "last_work", "last_sidequest"):
+            try:
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+            except Exception:
+                pass  # column already exists
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id          BIGSERIAL PRIMARY KEY,
@@ -133,3 +142,15 @@ async def add_xp(user_id: int, xp_amount: int) -> int:
         (new_xp, new_level, user_id),
     )
     return new_level
+
+
+async def set_last_hourly(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_hourly = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_work(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_work = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_sidequest(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_sidequest = $1 WHERE user_id = $2", (iso_datetime, user_id))
