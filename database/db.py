@@ -1,87 +1,87 @@
 """
-database/db.py – Async-friendly SQLite wrapper using the stdlib sqlite3 module.
-
-All queries run in a thread-pool executor so they never block the event loop.
+database/db.py – Async PostgreSQL wrapper using asyncpg.
+Connects to Aiven PostgreSQL via DATABASE_URL environment variable.
 """
 
 import asyncio
-import sqlite3
+import asyncpg
 import logging
-from pathlib import Path
-from functools import wraps
-from typing import Any
+from typing import Optional
 
 log = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "economy.db"
-SCHEMA_PATH = Path(__file__).parent / "schema.sql"
+_pool: Optional[asyncpg.Pool] = None
 
-# Module-level connection (re-used across calls)
-# _conn: sqlite3.Connection | None = None
-from typing import Optional
-_conn: Optional[sqlite3.Connection] = None
 
 # ── Initialisation ─────────────────────────────────────────────────────────────
 
-def _get_conn() -> sqlite3.Connection:
-    """Return the singleton SQLite connection, creating it if needed."""
-    global _conn
-    if _conn is None:
-        _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        _conn.row_factory = sqlite3.Row          # rows behave like dicts
-        _conn.execute("PRAGMA journal_mode=WAL")  # safer concurrent writes
-        _conn.execute("PRAGMA foreign_keys=ON")
-        log.info("SQLite connection opened at %s", DB_PATH)
-    return _conn
+async def _get_pool() -> asyncpg.Pool:
+    global _pool
+    if _pool is None:
+        import config
+        _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=1, max_size=5)
+        log.info("PostgreSQL connection pool created.")
+    return _pool
 
 
 def init_db() -> None:
-    """Create tables from schema.sql (called once at bot startup)."""
-    conn = _get_conn()
-    schema = SCHEMA_PATH.read_text()
-    conn.executescript(schema)
-    conn.commit()
+    """Create tables — called once at bot startup (runs the async version)."""
+    asyncio.get_event_loop().run_until_complete(_init_db_async())
+
+
+async def _init_db_async() -> None:
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id     BIGINT PRIMARY KEY,
+                wallet      BIGINT NOT NULL DEFAULT 0,
+                bank        BIGINT NOT NULL DEFAULT 0,
+                last_daily  TEXT,
+                xp          BIGINT NOT NULL DEFAULT 0,
+                level       INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS transactions (
+                id          BIGSERIAL PRIMARY KEY,
+                user_id     BIGINT NOT NULL,
+                amount      BIGINT NOT NULL,
+                reason      TEXT NOT NULL,
+                created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
     log.info("Database initialised.")
 
 
 # ── Low-level helpers ──────────────────────────────────────────────────────────
 
-def _run_sync(fn, *args, **kwargs):
-    """Run a synchronous callable in the default thread-pool executor."""
-    loop = asyncio.get_event_loop()
-    return loop.run_in_executor(None, lambda: fn(*args, **kwargs))
-
-
-async def fetchone(query: str, params: tuple = ()) -> sqlite3.Row | None:
+async def fetchone(query: str, params: tuple = ()) -> Optional[asyncpg.Record]:
     """Return a single row or None."""
-    def _inner():
-        return _get_conn().execute(query, params).fetchone()
-    return await _run_sync(_inner)
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetchrow(query, *params)
 
 
-async def fetchall(query: str, params: tuple = ()) -> list[sqlite3.Row]:
+async def fetchall(query: str, params: tuple = ()) -> list[asyncpg.Record]:
     """Return all matching rows."""
-    def _inner():
-        return _get_conn().execute(query, params).fetchall()
-    return await _run_sync(_inner)
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        return await conn.fetch(query, *params)
 
 
 async def execute(query: str, params: tuple = ()) -> None:
-    """Execute a write query and commit."""
-    def _inner():
-        conn = _get_conn()
-        conn.execute(query, params)
-        conn.commit()
-    await _run_sync(_inner)
+    """Execute a write query."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(query, *params)
 
 
 async def executemany(query: str, params_list: list[tuple]) -> None:
-    """Execute a write query for multiple rows and commit."""
-    def _inner():
-        conn = _get_conn()
-        conn.executemany(query, params_list)
-        conn.commit()
-    await _run_sync(_inner)
+    """Execute a write query for multiple rows."""
+    pool = await _get_pool()
+    async with pool.acquire() as conn:
+        await conn.executemany(query, params_list)
 
 
 # ── User helpers ───────────────────────────────────────────────────────────────
@@ -89,34 +89,34 @@ async def executemany(query: str, params_list: list[tuple]) -> None:
 async def ensure_user(user_id: int) -> None:
     """Insert a new user row if one does not already exist (idempotent)."""
     await execute(
-        "INSERT OR IGNORE INTO users (user_id) VALUES (?)",
+        "INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
         (user_id,),
     )
 
 
-async def get_user(user_id: int) -> sqlite3.Row | None:
+async def get_user(user_id: int) -> Optional[asyncpg.Record]:
     """Fetch a user row, auto-creating the record if missing."""
     await ensure_user(user_id)
-    return await fetchone("SELECT * FROM users WHERE user_id = ?", (user_id,))
+    return await fetchone("SELECT * FROM users WHERE user_id = $1", (user_id,))
 
 
 async def add_wallet(user_id: int, amount: int, reason: str = "") -> None:
     """Add *amount* (may be negative) to the user's wallet and log it."""
     await ensure_user(user_id)
     await execute(
-        "UPDATE users SET wallet = wallet + ? WHERE user_id = ?",
+        "UPDATE users SET wallet = wallet + $1 WHERE user_id = $2",
         (amount, user_id),
     )
     if reason:
         await execute(
-            "INSERT INTO transactions (user_id, amount, reason) VALUES (?, ?, ?)",
+            "INSERT INTO transactions (user_id, amount, reason) VALUES ($1, $2, $3)",
             (user_id, amount, reason),
         )
 
 
 async def set_last_daily(user_id: int, iso_datetime: str) -> None:
     await execute(
-        "UPDATE users SET last_daily = ? WHERE user_id = ?",
+        "UPDATE users SET last_daily = $1 WHERE user_id = $2",
         (iso_datetime, user_id),
     )
 
@@ -125,11 +125,11 @@ async def add_xp(user_id: int, xp_amount: int) -> int:
     """Add XP and auto-level. Returns the new level."""
     from config import XP_PER_LEVEL
     await ensure_user(user_id)
-    row = await fetchone("SELECT xp, level FROM users WHERE user_id = ?", (user_id,))
+    row = await fetchone("SELECT xp, level FROM users WHERE user_id = $1", (user_id,))
     new_xp = row["xp"] + xp_amount
     new_level = new_xp // XP_PER_LEVEL + 1
     await execute(
-        "UPDATE users SET xp = ?, level = ? WHERE user_id = ?",
+        "UPDATE users SET xp = $1, level = $2 WHERE user_id = $3",
         (new_xp, new_level, user_id),
     )
     return new_level
