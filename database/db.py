@@ -28,15 +28,9 @@ async def _get_pool() -> asyncpg.Pool:
     return _pool
 
 
-<<<<<<< HEAD
 def init_db() -> None:
     """Create tables — called once at bot startup."""
     asyncio.get_event_loop().run_until_complete(_init_db_async())
-=======
-async def init_db() -> None:
-    """Create tables — called once at bot startup."""
-    await _init_db_async()
->>>>>>> e11569e5e2f00d3e2a88ecd87a803a2b8e9844a4
 
 
 async def _init_db_async() -> None:
@@ -176,20 +170,4 @@ async def add_xp(user_id: int, xp_amount: int) -> int:
         "UPDATE users SET xp = $1, level = $2 WHERE user_id = $3",
         (new_xp, new_level, user_id),
     )
-<<<<<<< HEAD
     return new_level
-=======
-    return new_level
-
-
-async def set_last_hourly(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_hourly = $1 WHERE user_id = $2", (iso_datetime, user_id))
-
-
-async def set_last_work(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_work = $1 WHERE user_id = $2", (iso_datetime, user_id))
-
-
-async def set_last_sidequest(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_sidequest = $1 WHERE user_id = $2", (iso_datetime, user_id))
->>>>>>> e11569e5e2f00d3e2a88ecd87a803a2b8e9844a4
