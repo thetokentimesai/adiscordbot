@@ -2,8 +2,12 @@
 cogs/economy.py – Core economy commands.
 
 Commands: .balance/.bal, .wallet/.w, .daily/.dy, .hourly/.hr,
-          .work/.wr, .sidequest/.sq, .cooldowns/.cd,
-          .deposit/.dep/.d, .withdraw/.wd, .pay
+          .weekly/.wk, .monthly/.mo, .work/.wr, .sidequest/.sq,
+          .cooldowns/.cd, .deposit/.dep/.d, .withdraw/.wd, .pay
+
+Changes:
+  - .weekly and .monthly are verified-member only (role name configurable in config.py)
+  - All reward/bet amounts enforce non-negative wallet (no debt)
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ from database import db
 from utils.cooldowns import (
     check_daily_cooldown, check_hourly_cooldown,
     check_work_cooldown, check_sidequest_cooldown,
+    check_weekly_cooldown, check_monthly_cooldown,
     format_remaining,
 )
 from utils.economy_utils import fmt, error_embed, success_embed
@@ -64,6 +69,12 @@ def parse_amount(raw: str):
         return int(raw)
     except ValueError:
         return None
+
+
+def _is_verified(member: discord.Member) -> bool:
+    """Check if member has the verified role defined in config."""
+    verified_role_name = getattr(config, "VERIFIED_ROLE_NAME", "Verified")
+    return any(r.name == verified_role_name for r in member.roles)
 
 
 class Economy(commands.Cog):
@@ -142,6 +153,58 @@ class Economy(commands.Cog):
         embed.set_footer(text=f"Come back in {config.HOURLY_COOLDOWN_MINUTES} minutes.")
         await ctx.send(embed=embed)
 
+    # ── .weekly ────────────────────────────────────────────────────────────────
+
+    @commands.command(name="weekly", aliases=["wk"], help="Claim your weekly reward! Verified members only. (7d cooldown)")
+    async def weekly(self, ctx: commands.Context):
+        if not _is_verified(ctx.author):
+            verified_role = getattr(config, "VERIFIED_ROLE_NAME", "Verified")
+            return await ctx.send(embed=error_embed(
+                f"🔒  This command is for **{verified_role}** members only!\n"
+                f"Get verified in the server to unlock weekly & monthly rewards."
+            ))
+        user_id = ctx.author.id
+        can_claim, remaining = await check_weekly_cooldown(user_id)
+        if not can_claim:
+            return await ctx.send(embed=error_embed(
+                f"You already claimed your weekly!\nCome back in **{format_remaining(remaining)}**."
+            ))
+        reward = random.randint(config.WEEKLY_MIN, config.WEEKLY_MAX)
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        await db.add_wallet(user_id, reward, reason="weekly reward")
+        await db.set_last_weekly(user_id, now_iso)
+        await db.add_xp(user_id, config.XP_PER_COMMAND * 5)
+        row = await db.get_user(user_id)
+        embed = success_embed("📅  Weekly Reward!", f"You received **{fmt(reward)}**!\n\nNew wallet: {fmt(row['wallet'])}")
+        embed.set_footer(text="Come back in 7 days. Verified members only 🔒")
+        await ctx.send(embed=embed)
+
+    # ── .monthly ───────────────────────────────────────────────────────────────
+
+    @commands.command(name="monthly", aliases=["mo"], help="Claim your monthly reward! Verified members only. (30d cooldown)")
+    async def monthly(self, ctx: commands.Context):
+        if not _is_verified(ctx.author):
+            verified_role = getattr(config, "VERIFIED_ROLE_NAME", "Verified")
+            return await ctx.send(embed=error_embed(
+                f"🔒  This command is for **{verified_role}** members only!\n"
+                f"Get verified in the server to unlock weekly & monthly rewards."
+            ))
+        user_id = ctx.author.id
+        can_claim, remaining = await check_monthly_cooldown(user_id)
+        if not can_claim:
+            return await ctx.send(embed=error_embed(
+                f"You already claimed your monthly!\nCome back in **{format_remaining(remaining)}**."
+            ))
+        reward = random.randint(config.MONTHLY_MIN, config.MONTHLY_MAX)
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+        await db.add_wallet(user_id, reward, reason="monthly reward")
+        await db.set_last_monthly(user_id, now_iso)
+        await db.add_xp(user_id, config.XP_PER_COMMAND * 20)
+        row = await db.get_user(user_id)
+        embed = success_embed("🗓️  Monthly Reward!", f"You received **{fmt(reward)}**!\n\nNew wallet: {fmt(row['wallet'])}")
+        embed.set_footer(text="Come back in 30 days. Verified members only 🔒")
+        await ctx.send(embed=embed)
+
     # ── .work ──────────────────────────────────────────────────────────────────
 
     @commands.command(name="work", aliases=["wr"], help="Do some work and earn coins! (30m cooldown)")
@@ -190,15 +253,25 @@ class Economy(commands.Cog):
     async def cooldowns(self, ctx: commands.Context):
         user_id = ctx.author.id
         checks = {
-            "🎁 Daily":     check_daily_cooldown,
-            "⏰ Hourly":    check_hourly_cooldown,
-            "💼 Work":      check_work_cooldown,
-            "⚔️ Sidequest": check_sidequest_cooldown,
+            "🎁 Daily":      check_daily_cooldown,
+            "⏰ Hourly":     check_hourly_cooldown,
+            "💼 Work":       check_work_cooldown,
+            "⚔️ Sidequest":  check_sidequest_cooldown,
         }
         embed = discord.Embed(title=f"⏱️  {ctx.author.display_name}'s Cooldowns", color=config.COLOR_INFO)
         for label, check_fn in checks.items():
             can_claim, remaining = await check_fn(user_id)
             embed.add_field(name=label, value="✅ Ready!" if can_claim else f"⏳ {format_remaining(remaining)}", inline=True)
+
+        # Only show weekly/monthly if verified
+        if _is_verified(ctx.author):
+            for label, check_fn in [("📅 Weekly", check_weekly_cooldown), ("🗓️ Monthly", check_monthly_cooldown)]:
+                can_claim, remaining = await check_fn(user_id)
+                embed.add_field(name=label, value="✅ Ready!" if can_claim else f"⏳ {format_remaining(remaining)}", inline=True)
+        else:
+            verified_role = getattr(config, "VERIFIED_ROLE_NAME", "Verified")
+            embed.set_footer(text=f"🔒 Get the {verified_role} role to unlock weekly & monthly rewards!")
+
         await ctx.send(embed=embed)
 
     # ── .deposit ───────────────────────────────────────────────────────────────

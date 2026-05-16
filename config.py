@@ -49,6 +49,24 @@ SIDEQUEST_MIN: int = 300
 SIDEQUEST_MAX: int = 700
 SIDEQUEST_COOLDOWN_HOURS: int = 6
 
+# ── Weekly reward (verified members only) ─────────────────────────────────────
+WEEKLY_MIN: int = 5_000
+WEEKLY_MAX: int = 15_000
+
+# ── Monthly reward (verified members only) ────────────────────────────────────
+MONTHLY_MIN: int = 25_000
+MONTHLY_MAX: int = 75_000
+
+# ── Verified role name ────────────────────────────────────────────────────────
+# Change this to match the exact role name in your Discord server.
+VERIFIED_ROLE_NAME: str = "Verified"
+
+# ── Minigame settings ─────────────────────────────────────────────────────────
+MINIGAME_REWARD_MIN: int = 100   # minimum coins awarded for a correct answer
+MINIGAME_REWARD_MAX: int = 500   # maximum coins awarded for a correct answer
+MINIGAME_AUTO_EVERY: int = 25    # spawn a minigame after this many messages
+MINIGAME_TIMEOUT: int    = 30    # seconds before an unanswered game expires
+
 # ── Embed colours ─────────────────────────────────────────────────────────────
 COLOR_SUCCESS: int = 0x2ECC71
 COLOR_ERROR: int   = 0xE74C3C

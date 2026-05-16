@@ -1,7 +1,7 @@
 """
 utils/cooldowns.py – Reusable cooldown helpers.
 
-DB-backed cooldowns for persistent rewards (daily, hourly, work, sidequest).
+DB-backed cooldowns for persistent rewards (daily, hourly, work, sidequest, weekly, monthly).
 In-memory cooldowns for short per-session things (gamble spam).
 """
 
@@ -30,9 +30,12 @@ def is_on_cooldown(user_id: int, command: str) -> bool:
 
 def format_remaining(seconds: float) -> str:
     seconds = int(seconds)
-    h, rem = divmod(seconds, 3600)
-    m, s = divmod(rem, 60)
+    d, rem  = divmod(seconds, 86400)
+    h, rem  = divmod(rem, 3600)
+    m, s    = divmod(rem, 60)
     parts = []
+    if d:
+        parts.append(f"{d}d")
     if h:
         parts.append(f"{h}h")
     if m:
@@ -78,3 +81,11 @@ async def check_work_cooldown(user_id: int) -> tuple[bool, float]:
 async def check_sidequest_cooldown(user_id: int) -> tuple[bool, float]:
     from config import SIDEQUEST_COOLDOWN_HOURS
     return await check_db_cooldown(user_id, "last_sidequest", SIDEQUEST_COOLDOWN_HOURS * 3600)
+
+
+async def check_weekly_cooldown(user_id: int) -> tuple[bool, float]:
+    return await check_db_cooldown(user_id, "last_weekly", 7 * 24 * 3600)
+
+
+async def check_monthly_cooldown(user_id: int) -> tuple[bool, float]:
+    return await check_db_cooldown(user_id, "last_monthly", 30 * 24 * 3600)

@@ -1,6 +1,11 @@
 """
 database/db.py – Async PostgreSQL wrapper using asyncpg.
 Connects to Aiven PostgreSQL via DATABASE_URL environment variable.
+
+Changes:
+  - add_wallet now enforces wallet >= 0 (no debt)
+  - Added set_last_weekly / set_last_monthly
+  - Schema init includes last_weekly, last_monthly columns
 """
 
 import asyncio
@@ -25,7 +30,7 @@ async def _get_pool() -> asyncpg.Pool:
 
 
 def init_db() -> None:
-    """Create tables — called once at bot startup (runs the async version)."""
+    """Create tables — called once at bot startup."""
     asyncio.get_event_loop().run_until_complete(_init_db_async())
 
 
@@ -41,16 +46,26 @@ async def _init_db_async() -> None:
                 last_hourly    TEXT,
                 last_work      TEXT,
                 last_sidequest TEXT,
+                last_weekly    TEXT,
+                last_monthly   TEXT,
                 xp             BIGINT NOT NULL DEFAULT 0,
                 level          INTEGER NOT NULL DEFAULT 1
             )
         """)
         # Add new columns if upgrading from an older schema
-        for col in ("last_hourly", "last_work", "last_sidequest"):
+        new_columns = [
+            ("last_hourly",    "TEXT"),
+            ("last_work",      "TEXT"),
+            ("last_sidequest", "TEXT"),
+            ("last_weekly",    "TEXT"),
+            ("last_monthly",   "TEXT"),
+        ]
+        for col, col_type in new_columns:
             try:
-                await conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+                await conn.execute(f"ALTER TABLE users ADD COLUMN {col} {col_type}")
             except Exception:
                 pass  # column already exists
+
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id          BIGSERIAL PRIMARY KEY,
@@ -66,28 +81,24 @@ async def _init_db_async() -> None:
 # ── Low-level helpers ──────────────────────────────────────────────────────────
 
 async def fetchone(query: str, params: tuple = ()) -> Optional[asyncpg.Record]:
-    """Return a single row or None."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
         return await conn.fetchrow(query, *params)
 
 
 async def fetchall(query: str, params: tuple = ()) -> list[asyncpg.Record]:
-    """Return all matching rows."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
         return await conn.fetch(query, *params)
 
 
 async def execute(query: str, params: tuple = ()) -> None:
-    """Execute a write query."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
         await conn.execute(query, *params)
 
 
 async def executemany(query: str, params_list: list[tuple]) -> None:
-    """Execute a write query for multiple rows."""
     pool = await _get_pool()
     async with pool.acquire() as conn:
         await conn.executemany(query, params_list)
@@ -96,7 +107,6 @@ async def executemany(query: str, params_list: list[tuple]) -> None:
 # ── User helpers ───────────────────────────────────────────────────────────────
 
 async def ensure_user(user_id: int) -> None:
-    """Insert a new user row if one does not already exist (idempotent)."""
     await execute(
         "INSERT INTO users (user_id) VALUES ($1) ON CONFLICT (user_id) DO NOTHING",
         (user_id,),
@@ -104,16 +114,19 @@ async def ensure_user(user_id: int) -> None:
 
 
 async def get_user(user_id: int) -> Optional[asyncpg.Record]:
-    """Fetch a user row, auto-creating the record if missing."""
     await ensure_user(user_id)
     return await fetchone("SELECT * FROM users WHERE user_id = $1", (user_id,))
 
 
 async def add_wallet(user_id: int, amount: int, reason: str = "") -> None:
-    """Add *amount* (may be negative) to the user's wallet and log it."""
+    """
+    Add *amount* (may be negative) to the user's wallet and log it.
+    Wallet is clamped to 0 — it can never go negative.
+    """
     await ensure_user(user_id)
+    # Use GREATEST to prevent negative wallet balance (no debt allowed)
     await execute(
-        "UPDATE users SET wallet = wallet + $1 WHERE user_id = $2",
+        "UPDATE users SET wallet = GREATEST(0, wallet + $1) WHERE user_id = $2",
         (amount, user_id),
     )
     if reason:
@@ -124,10 +137,27 @@ async def add_wallet(user_id: int, amount: int, reason: str = "") -> None:
 
 
 async def set_last_daily(user_id: int, iso_datetime: str) -> None:
-    await execute(
-        "UPDATE users SET last_daily = $1 WHERE user_id = $2",
-        (iso_datetime, user_id),
-    )
+    await execute("UPDATE users SET last_daily = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_hourly(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_hourly = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_work(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_work = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_sidequest(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_sidequest = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_weekly(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_weekly = $1 WHERE user_id = $2", (iso_datetime, user_id))
+
+
+async def set_last_monthly(user_id: int, iso_datetime: str) -> None:
+    await execute("UPDATE users SET last_monthly = $1 WHERE user_id = $2", (iso_datetime, user_id))
 
 
 async def add_xp(user_id: int, xp_amount: int) -> int:
@@ -142,15 +172,3 @@ async def add_xp(user_id: int, xp_amount: int) -> int:
         (new_xp, new_level, user_id),
     )
     return new_level
-
-
-async def set_last_hourly(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_hourly = $1 WHERE user_id = $2", (iso_datetime, user_id))
-
-
-async def set_last_work(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_work = $1 WHERE user_id = $2", (iso_datetime, user_id))
-
-
-async def set_last_sidequest(user_id: int, iso_datetime: str) -> None:
-    await execute("UPDATE users SET last_sidequest = $1 WHERE user_id = $2", (iso_datetime, user_id))
