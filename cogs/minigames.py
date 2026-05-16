@@ -187,6 +187,24 @@ def _make_math() -> tuple[str, int]:
     return question, answer
 
 
+# ── Number sequence ────────────────────────────────────────────────────────────
+
+SEQUENCE_TYPES = [
+    lambda n: [n, n + 2, n + 4, n + 6],
+    lambda n: [n, n * 2, n * 4, n * 8],
+    lambda n: [n, n + 5, n + 10, n + 15],
+    lambda n: [n, n * 3, n * 9, n * 27],
+]
+
+
+def _make_sequence() -> tuple[str, list[str]]:
+    base = random.randint(1, 20)
+    seq = random.choice(SEQUENCE_TYPES)(base)
+    answer = str(seq[-1])
+    question = f"**{'  '.join(map(str, seq[:-1]))}  ?**"
+    return question, [answer]
+
+
 # ── Active game tracker ────────────────────────────────────────────────────────
 
 class ActiveGame:
@@ -250,17 +268,25 @@ class Minigames(commands.Cog):
         if channel.id in self._active_games:
             return  # already one running
 
-        game_choice = random.choice(["flag", "math", "scramble", "trivia"])
-        reward = random.randint(REWARD_MIN, REWARD_MAX)
+        game_choice = random.choice(["flag", "math", "scramble", "trivia", "sequence"])
+
+        difficulty_name, reward_min, reward_max = random.choice([
+            ("Easy",   100, 250),
+            ("Medium", 250, 500),
+            ("Hard",   500, 900),
+        ])
+        reward = random.randint(reward_min, reward_max)
 
         if game_choice == "flag":
-            await self._spawn_flag(channel, reward)
+            await self._spawn_flag(channel, reward, difficulty_name)
         elif game_choice == "math":
-            await self._spawn_math(channel, reward)
+            await self._spawn_math(channel, reward, difficulty_name)
         elif game_choice == "scramble":
-            await self._spawn_scramble(channel, reward)
+            await self._spawn_scramble(channel, reward, difficulty_name)
+        elif game_choice == "sequence":
+            await self._spawn_sequence(channel, reward, difficulty_name)
         else:
-            await self._spawn_trivia(channel, reward)
+            await self._spawn_trivia(channel, reward, difficulty_name)
 
     async def _post_game(self, channel, embed: discord.Embed, answers: list[str], reward: int, game_type: str):
         """Post the game embed and register it, then expire after timeout."""
@@ -279,10 +305,10 @@ class Minigames(commands.Cog):
             )
             await channel.send(embed=expired)
 
-    async def _spawn_flag(self, channel, reward: int):
+    async def _spawn_flag(self, channel, reward: int, difficulty_name: str):
         emoji, answers = random.choice(FLAGS)
         embed = discord.Embed(
-            title="🚩  Guess the Flag!",
+            title=f"🚩  Guess the Flag! • {difficulty_name}",
             description=(
                 f"# {emoji}\n\n"
                 f"Which country does this flag belong to?\n"
@@ -293,10 +319,10 @@ class Minigames(commands.Cog):
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, answers, reward, "flag")
 
-    async def _spawn_math(self, channel, reward: int):
+    async def _spawn_math(self, channel, reward: int, difficulty_name: str):
         question, answer = _make_math()
         embed = discord.Embed(
-            title="➗  Math Challenge!",
+            title=f"➗  Math Challenge! • {difficulty_name}",
             description=(
                 f"Solve this: {question}\n\n"
                 f"First correct answer wins **{fmt(reward)}**!"
@@ -306,11 +332,11 @@ class Minigames(commands.Cog):
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, [str(answer)], reward, "math")
 
-    async def _spawn_scramble(self, channel, reward: int):
+    async def _spawn_scramble(self, channel, reward: int, difficulty_name: str):
         word = random.choice(SCRAMBLE_WORDS)
         scrambled = _scramble(word)
         embed = discord.Embed(
-            title="🔤  Unscramble the Word!",
+            title=f"🔤  Unscramble the Word! • {difficulty_name}",
             description=(
                 f"**`{scrambled.upper()}`**\n\n"
                 f"Unscramble this word!\n"
@@ -321,10 +347,10 @@ class Minigames(commands.Cog):
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, [word], reward, "scramble")
 
-    async def _spawn_trivia(self, channel, reward: int):
+    async def _spawn_trivia(self, channel, reward: int, difficulty_name: str):
         question, answers = random.choice(TRIVIA)
         embed = discord.Embed(
-            title="❓  Trivia Time!",
+            title=f"❓  Trivia Time! • {difficulty_name}",
             description=(
                 f"{question}\n\n"
                 f"First correct answer wins **{fmt(reward)}**!"
@@ -333,6 +359,19 @@ class Minigames(commands.Cog):
         )
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, answers, reward, "trivia")
+
+    async def _spawn_sequence(self, channel, reward: int, difficulty_name: str):
+        question, answers = _make_sequence()
+        embed = discord.Embed(
+            title=f"🔢 Number Sequence • {difficulty_name}",
+            description=(
+                f"What comes next?\n{question}\n\n"
+                f"First correct answer wins **{fmt(reward)}**!"
+            ),
+            color=0x1ABC9C,
+        )
+        embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
+        await self._post_game(channel, embed, answers, reward, "sequence")
 
     # ── Manual trigger ─────────────────────────────────────────────────────────
 

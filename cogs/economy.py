@@ -28,6 +28,25 @@ from utils.cooldowns import (
 )
 from utils.economy_utils import fmt, error_embed, success_embed
 
+# ADD these imports in cogs/economy.py
+
+from datetime import timedelta
+
+from utils.cooldowns import (
+    check_daily_cooldown,
+    check_hourly_cooldown,
+    check_work_cooldown,
+    check_sidequest_cooldown,
+    check_weekly_cooldown,
+    check_monthly_cooldown,
+    check_rob_cooldown,
+    check_steal_cooldown,
+    check_heist_cooldown,
+    format_remaining,
+)
+
+from datetime import datetime, timezone
+
 WORK_MESSAGES = [
     "You fixed some bugs and got paid",
     "You delivered pizzas and earned",
@@ -350,6 +369,453 @@ class Economy(commands.Cog):
             "💸  Payment Sent",
             f"{ctx.author.mention} paid {recipient.mention} **{fmt(parsed)}**!",
         ))
+
+        # ADD THIS COMMAND inside Economy class
+
+    @commands.command(name="send", aliases=["pay"], help="Send money to another user.")
+    async def send(self, ctx: commands.Context, member: discord.Member = None, amount: str = None):
+
+        if member is None or amount is None:
+            return await ctx.send(
+                embed=error_embed(
+                    "Usage: `.send @user <amount>`"
+                )
+            )
+
+        if member.bot:
+            return await ctx.send(
+                embed=error_embed(
+                    "You cannot send coins to bots."
+                )
+            )
+
+        if member.id == ctx.author.id:
+            return await ctx.send(
+                embed=error_embed(
+                    "You cannot send coins to yourself."
+                )
+            )
+
+        parsed = parse_amount(amount)
+
+        if parsed is None or parsed <= 0:
+            return await ctx.send(
+                embed=error_embed(
+                    "Invalid amount."
+                )
+            )
+
+        sender = await db.get_user(ctx.author.id)
+
+        if sender["wallet"] < parsed:
+            return await ctx.send(
+                embed=error_embed(
+                    f"You only have {fmt(sender['wallet'])} in your wallet."
+                )
+            )
+
+        await db.add_wallet(
+            ctx.author.id,
+            -parsed,
+            reason=f"sent to {member.id}"
+        )
+
+        await db.add_wallet(
+            member.id,
+            parsed,
+            reason=f"received from {ctx.author.id}"
+        )
+
+        embed = success_embed(
+            "💸 Money Sent",
+            f"You sent {fmt(parsed)} to {member.mention}!"
+        )
+
+        await ctx.send(embed=embed)
+
+        # ADD THIS COMMAND inside Economy class
+
+    @commands.command(name="rob", help="Attempt to rob another user.")
+    async def rob(self, ctx: commands.Context, member: discord.Member = None):
+
+        if member is None:
+            return await ctx.send(
+                embed=error_embed(
+                    "Usage: `.rob @user`"
+                )
+            )
+
+        if member.bot or member.id == ctx.author.id:
+            return await ctx.send(
+                embed=error_embed(
+                    "Invalid target."
+                )
+            )
+
+        robber = await db.get_user(ctx.author.id)
+        victim = await db.get_user(member.id)
+
+        if robber["wallet"] < 250:
+            return await ctx.send(
+                embed=error_embed(
+                    "You need at least 🪙 250 in your wallet to rob someone."
+                )
+            )
+
+        if victim["wallet"] <= 0:
+            return await ctx.send(
+                embed=error_embed(
+                    f"{member.display_name} has no money in their wallet."
+                )
+            )
+
+        can_use, remaining = await check_rob_cooldown(ctx.author.id)
+
+        if not can_use:
+            return await ctx.send(
+                embed=error_embed(
+                    f"You must wait **{format_remaining(remaining)}** before robbing again."
+                )
+            )
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+        await db.set_last_rob(
+            ctx.author.id,
+            now_iso
+        )
+
+        success = random.random() <= 0.12
+
+        if success:
+
+            percent = random.randint(35, 50)
+
+            stolen = max(
+                1,
+                int(victim["wallet"] * (percent / 100))
+            )
+
+            await db.add_wallet(
+                member.id,
+                -stolen,
+                reason="robbed"
+            )
+
+            await db.add_wallet(
+                ctx.author.id,
+                stolen,
+                reason="rob success"
+            )
+
+            return await ctx.send(
+                embed=success_embed(
+                    "🦹 Rob Successful",
+                    f"You robbed {member.mention} and stole {fmt(stolen)}!"
+                )
+            )
+
+        return await ctx.send(
+            embed=error_embed(
+                f"You failed to rob {member.mention}."
+            )
+        )
+    
+
+    # ADD THIS COMMAND inside Economy class
+
+    @commands.command(name="steal", help="Attempt to steal from another user.")
+    async def steal(self, ctx: commands.Context, member: discord.Member = None):
+
+        if member is None:
+            return await ctx.send(
+                embed=error_embed(
+                    "Usage: `.steal @user`"
+                )
+            )
+
+        if member.bot or member.id == ctx.author.id:
+            return await ctx.send(
+                embed=error_embed(
+                    "Invalid target."
+                )
+            )
+
+        robber = await db.get_user(ctx.author.id)
+        victim = await db.get_user(member.id)
+
+        if robber["wallet"] < 250:
+            return await ctx.send(
+                embed=error_embed(
+                    "You need at least 🪙 250 in your wallet to steal from someone."
+                )
+            )
+
+        if victim["wallet"] <= 0:
+            return await ctx.send(
+                embed=error_embed(
+                    f"{member.display_name} has no money in their wallet."
+                )
+            )
+
+        can_use, remaining = await check_steal_cooldown(ctx.author.id)
+
+        if not can_use:
+            return await ctx.send(
+                embed=error_embed(
+                    f"You must wait **{format_remaining(remaining)}** before stealing again."
+                )
+            )
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+        await db.set_last_steal(
+            ctx.author.id,
+            now_iso
+        )
+
+        success = random.random() <= 0.25
+
+        if success:
+
+            percent = random.randint(15, 20)
+
+            stolen = max(
+                1,
+                int(victim["wallet"] * (percent / 100))
+            )
+
+            await db.add_wallet(
+                member.id,
+                -stolen,
+                reason="stolen from"
+            )
+
+            await db.add_wallet(
+                ctx.author.id,
+                stolen,
+                reason="steal success"
+            )
+
+            return await ctx.send(
+                embed=success_embed(
+                    "🕵️ Steal Successful",
+                    f"You stole {fmt(stolen)} from {member.mention}!"
+                )
+            )
+
+        return await ctx.send(
+            embed=error_embed(
+                f"You failed to steal from {member.mention}."
+            )
+        )
+
+# --------------------
+
+    # ADD THIS COMMAND inside Economy class
+
+    @commands.command(name="heist", help="Attempt a risky heist.")
+    async def heist(
+        self,
+        ctx: commands.Context,
+        target: str = None,
+        member1: discord.Member = None,
+        member2: discord.Member = None
+    ):
+
+        if target is None:
+            return await ctx.send(
+                embed=error_embed(
+                    "Usage: `.heist <store|jewelry|bank> [@user1] [@user2]`"
+                )
+            )
+
+        target = target.lower()
+
+        heists = {
+            "store": {
+                "reward": (15000, 25000),
+                "jail": (1.5, 2),
+                "rates": {
+                    1: 15,
+                    2: 20,
+                    3: 25
+                }
+            },
+
+            "jewelry": {
+                "reward": (50000, 60000),
+                "jail": (2, 3),
+                "rates": {
+                    1: 10,
+                    2: 15,
+                    3: 20
+                }
+            },
+
+            "bank": {
+                "reward": (90000, 100000),
+                "jail": (3.5, 4),
+                "rates": {
+                    1: 5,
+                    2: 10,
+                    3: 15
+                }
+            }
+        }
+
+        if target not in heists:
+            return await ctx.send(
+                embed=error_embed(
+                    "Choose: `store`, `jewelry`, or `bank`."
+                )
+            )
+
+        team = [ctx.author]
+
+        if member1:
+            if member1.bot:
+                return await ctx.send(
+                    embed=error_embed(
+                        "Bots cannot join heists."
+                    )
+                )
+
+            team.append(member1)
+
+        if member2:
+            if member2.bot:
+                return await ctx.send(
+                    embed=error_embed(
+                        "Bots cannot join heists."
+                    )
+                )
+
+            team.append(member2)
+
+        unique_ids = set(member.id for member in team)
+
+        if len(unique_ids) != len(team):
+            return await ctx.send(
+                embed=error_embed(
+                    "Duplicate users are not allowed."
+                )
+            )
+
+        # Check wallets and cooldowns
+        for member in team:
+
+            row = await db.get_user(member.id)
+
+            if row["wallet"] < 2000:
+                return await ctx.send(
+                    embed=error_embed(
+                        f"{member.display_name} needs at least 🪙 2,000 in their wallet."
+                    )
+                )
+
+            # Jail check
+            if row["jail_until"]:
+
+                jail_until = datetime.fromisoformat(
+                    row["jail_until"]
+                ).replace(tzinfo=timezone.utc)
+
+                if datetime.now(tz=timezone.utc) < jail_until:
+
+                    remaining = (
+                        jail_until - datetime.now(tz=timezone.utc)
+                    ).total_seconds()
+
+                    return await ctx.send(
+                        embed=error_embed(
+                            f"{member.display_name} is currently in jail for another **{format_remaining(remaining)}**."
+                        )
+                    )
+
+                else:
+                    await db.set_jail_until(member.id, None)
+
+            can_use, remaining = await check_heist_cooldown(member.id)
+
+            if not can_use:
+                return await ctx.send(
+                    embed=error_embed(
+                        f"{member.display_name} must wait **{format_remaining(remaining)}** before another heist."
+                    )
+                )
+
+        data = heists[target]
+
+        success_rate = data["rates"][len(team)]
+
+        now_iso = datetime.now(tz=timezone.utc).isoformat()
+
+        for member in team:
+            await db.set_last_heist(
+                member.id,
+                now_iso
+            )
+
+        success = random.randint(1, 100) <= success_rate
+
+        # SUCCESS
+        if success:
+
+            total = random.randint(
+                data["reward"][0],
+                data["reward"][1]
+            )
+
+            split = total // len(team)
+
+            for member in team:
+                await db.add_wallet(
+                    member.id,
+                    split,
+                    reason="heist success"
+                )
+
+            mentions = ", ".join(
+                member.mention for member in team
+            )
+
+            return await ctx.send(
+                embed=success_embed(
+                    "💰 Heist Successful",
+                    f"{mentions}\n\n"
+                    f"You stole {fmt(total)} total!\n"
+                    f"Each member received {fmt(split)}."
+                )
+            )
+
+        # FAILURE
+        jail_hours = random.uniform(
+            data["jail"][0],
+            data["jail"][1]
+        )
+
+        jail_until = datetime.now(
+            tz=timezone.utc
+        ) + timedelta(hours=jail_hours)
+
+        for member in team:
+            await db.set_jail_until(
+                member.id,
+                jail_until.isoformat()
+            )
+
+        mentions = ", ".join(
+            member.mention for member in team
+        )
+
+        return await ctx.send(
+            embed=error_embed(
+                f"🚔 The heist failed!\n\n"
+                f"{mentions}\n\n"
+                f"Jail time: {round(jail_hours, 1)} hours."
+            )
+        )
 
 
 def setup(bot: commands.Bot) -> None:

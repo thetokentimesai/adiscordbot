@@ -26,6 +26,8 @@ from utils.economy_utils import fmt, error_embed, validate_bet
 from utils.cooldowns import is_on_cooldown, set_cooldown, get_remaining, format_remaining
 from utils.blackjack import BlackjackGame, Outcome, cards_str
 
+from datetime import datetime, timezone
+
 # Gambling cooldown in seconds (prevents spam)
 GAMBLE_COOLDOWN = 5
 
@@ -301,6 +303,25 @@ class Games(commands.Cog):
             remaining = get_remaining(user_id, "gamble")
             return f"Slow down! Wait **{format_remaining(remaining)}** before gambling again."
         return None
+
+    async def _check_jail(self, user_id: int):
+        row = await db.get_user(user_id)
+        if not row["jail_until"]:
+            return None
+        jail_until = datetime.fromisoformat(
+            row["jail_until"]
+        ).replace(tzinfo=timezone.utc)
+        # Jail expired
+        if datetime.now(tz=timezone.utc) >= jail_until:
+            await db.set_jail_until(
+                user_id,
+                None
+            )
+            return None
+        remaining = (
+            jail_until - datetime.now(tz=timezone.utc)
+        ).total_seconds()
+        return format_remaining(remaining)
 
     # ── .coinflip ──────────────────────────────────────────────────────────────
     # Accepts any order: .cf 100 h | .cf h 100 | .cf half tails | .cf all t

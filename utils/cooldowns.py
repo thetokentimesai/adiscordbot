@@ -33,14 +33,20 @@ def format_remaining(seconds: float) -> str:
     d, rem  = divmod(seconds, 86400)
     h, rem  = divmod(rem, 3600)
     m, s    = divmod(rem, 60)
+
     parts = []
+
     if d:
         parts.append(f"{d}d")
+
     if h:
         parts.append(f"{h}h")
+
     if m:
         parts.append(f"{m}m")
+
     parts.append(f"{s}s")
+
     return " ".join(parts)
 
 
@@ -48,6 +54,7 @@ def format_remaining(seconds: float) -> str:
 
 async def check_db_cooldown(user_id: int, column: str, cooldown_seconds: float) -> tuple[bool, float]:
     from database import db
+
     row = await db.get_user(user_id)
     last_str = row[column]
 
@@ -60,6 +67,7 @@ async def check_db_cooldown(user_id: int, column: str, cooldown_seconds: float) 
 
     if now >= cooldown_end:
         return True, 0.0
+
     return False, (cooldown_end - now).total_seconds()
 
 
@@ -89,3 +97,17 @@ async def check_weekly_cooldown(user_id: int) -> tuple[bool, float]:
 
 async def check_monthly_cooldown(user_id: int) -> tuple[bool, float]:
     return await check_db_cooldown(user_id, "last_monthly", 30 * 24 * 3600)
+
+
+# ── Crime cooldowns ────────────────────────────────────────────────────────────
+
+async def check_rob_cooldown(user_id: int) -> tuple[bool, float]:
+    return await check_db_cooldown(user_id, "last_rob", 3 * 3600)
+
+
+async def check_steal_cooldown(user_id: int) -> tuple[bool, float]:
+    return await check_db_cooldown(user_id, "last_steal", 3 * 3600)
+
+
+async def check_heist_cooldown(user_id: int) -> tuple[bool, float]:
+    return await check_db_cooldown(user_id, "last_heist", 8 * 3600)

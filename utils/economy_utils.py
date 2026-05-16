@@ -28,7 +28,7 @@ def success_embed(title: str, description: str) -> discord.Embed:
 # ── Validation ─────────────────────────────────────────────────────────────────
 
 async def validate_bet(
-    ctx: discord.ApplicationContext,
+    ctx,
     amount: int,
     wallet: int,
 ) -> bool:
@@ -38,27 +38,29 @@ async def validate_bet(
     """
     from config import MIN_BET, MAX_BET
 
+    if amount <= 0:
+        await ctx.send(
+            embed=error_embed("Bet amount must be greater than 0.")
+        )
+        return False
+
     if amount < MIN_BET:
-        await ctx.respond(
-            embed=error_embed(f"Minimum bet is {fmt(MIN_BET)}."),
-            ephemeral=True,
+        await ctx.send(
+            embed=error_embed(f"Minimum bet is {fmt(MIN_BET)}.")
         )
         return False
 
     if amount > MAX_BET:
-        await ctx.respond(
-            embed=error_embed(f"Maximum bet is {fmt(MAX_BET)}."),
-            ephemeral=True,
+        await ctx.send(
+            embed=error_embed(f"Maximum bet is {fmt(MAX_BET)}.")
         )
         return False
 
     if amount > wallet:
-        await ctx.respond(
+        await ctx.send(
             embed=error_embed(
-                f"You only have {fmt(wallet)} in your wallet.\n"
-                f"Use `/withdraw` to move coins from your bank."
-            ),
-            ephemeral=True,
+                f"You only have {fmt(wallet)} in your wallet."
+            )
         )
         return False
 

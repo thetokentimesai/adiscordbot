@@ -4,6 +4,7 @@ cogs/fun.py – Fun percentage commands with deterministic weekly RNG.
 Commands: .gaybar, .ship, .susmeter, .nerdrate
 """
 
+from utils.economy_utils import error_embed
 from __future__ import annotations
 
 import discord
@@ -158,35 +159,46 @@ class Fun(commands.Cog):
         await ctx.send(embed=embed)
 
     # ── .ship ──────────────────────────────────────────────────────────────────
+    # REPLACE your current .ship command with THIS
 
-    @commands.command(name="ship", help="Check the compatibility of two users 💞")
-    async def ship(self, ctx: commands.Context, user1: discord.Member = None, user2: discord.Member = None):
-        if user1 is None or user2 is None:
-            return await ctx.send(embed=discord.Embed(
-                description="❌  Usage: `.ship <@user1> <@user2>`",
-                color=config.COLOR_ERROR,
-            ))
+    @commands.command(name="ship", help="Ship yourself with another user 💞")
+    async def ship(self, ctx: commands.Context, user: discord.Member = None):
 
-        if user1.id == user2.id:
-            return await ctx.send(embed=discord.Embed(
-                description="You can't ship someone with themselves! 😂",
-                color=config.COLOR_ERROR,
-            ))
+        if user is None:
+            return await ctx.send(
+                embed=error_embed(
+                    "Usage: `.ship @user`"
+                )
+            )
 
-        percent   = ship_percent(user1.id, user2.id)
-        ship_name = _ship_name(user1.display_name, user2.display_name)
-        message   = _ship_message(percent)
+        if user.id == ctx.author.id:
+            return await ctx.send(
+                embed=error_embed(
+                    "You cannot ship yourself 😭"
+                )
+            )
 
-        heart = "💔" if percent < 30 else ("❤️" if percent < 70 else "💖")
+        percent = ship_percent(ctx.author.id, user.id)
+
+        ship_name = _ship_name(
+            ctx.author.display_name,
+            user.display_name
+        )
 
         embed = discord.Embed(
-            title=f"{heart}  Ship: {user1.display_name} & {user2.display_name}",
-            color=config.COLOR_PURPLE,
+            title=f"💞 {ship_name}",
+            description=(
+                f"{ctx.author.mention} ❤️ {user.mention}\n\n"
+                f"{_bar(percent)}  **{percent}%**\n\n"
+                f"{_ship_message(percent)}"
+            ),
+            color=config.COLOR_GOLD,
         )
-        embed.add_field(name="Ship Name",     value=f"**{ship_name}**",               inline=False)
-        embed.add_field(name="Compatibility", value=f"{_bar(percent)}  **{percent}%**", inline=False)
-        embed.add_field(name="Verdict",       value=message,                           inline=False)
-        embed.set_footer(text="Resets every Monday 00:00 UTC")
+
+        embed.set_footer(
+            text="Relationship score resets every Monday 00:00 UTC"
+        )
+
         await ctx.send(embed=embed)
 
 

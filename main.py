@@ -36,7 +36,26 @@ async def help_command(ctx: commands.Context):
     embed.add_field(name=".wallet [.w]",                 value="Check just your wallet balance",        inline=True)
     embed.add_field(name=".deposit [.dep/.d] <amt|all>", value="Deposit coins to bank",                 inline=True)
     embed.add_field(name=".withdraw [.wd] <amt|all>",    value="Withdraw coins from bank",              inline=True)
-    embed.add_field(name=".pay <@user> <amount>",        value="Pay another user",                      inline=True)
+    embed.add_field(
+        name=".send [.pay] <@user> <amount>",
+        value="Send coins to another user",
+        inline=True
+    )
+    embed.add_field(
+        name=".rob <@user>",
+        value="Attempt to rob another user",
+        inline=True
+    )
+    embed.add_field(
+        name=".steal <@user>",
+        value="Attempt to steal from another user",
+        inline=True
+    )
+    embed.add_field(
+        name=".heist <store|jewelry|bank>",
+        value="Attempt a risky heist",
+        inline=True
+    )
 
     # ── Rewards ────────────────────────────────────────────────────────────────
     embed.add_field(name="\u200b", value="**🎁 Rewards**", inline=False)
@@ -88,7 +107,7 @@ async def help_command(ctx: commands.Context):
     embed.add_field(name="\u200b", value="**🧠 Minigames**", inline=False)
     embed.add_field(
         name="Auto-spawning",
-        value=f"Flag, math, unscramble & trivia questions pop up every ~{config.MINIGAME_AUTO_EVERY} messages. First correct answer wins 🪙 {config.MINIGAME_REWARD_MIN}–{config.MINIGAME_REWARD_MAX}!",
+        value=f"Flag, math, sequence, unscramble & trivia questions pop up every ~{config.MINIGAME_AUTO_EVERY} messages. First correct answer wins 🪙 rewards!",
         inline=False,
     )
     embed.add_field(name=".minigame [.mg]", value="Manually trigger a minigame",          inline=True)
@@ -99,7 +118,11 @@ async def help_command(ctx: commands.Context):
     embed.add_field(name=".gaybar [@user]",   value="Gay-o-meter 🌈",         inline=True)
     embed.add_field(name=".susmeter [@user]", value="Sus meter 📣",           inline=True)
     embed.add_field(name=".nerdrate [@user]", value="Nerd rate 🤓",           inline=True)
-    embed.add_field(name=".ship <@u1> <@u2>", value="Compatibility check 💞", inline=True)
+    embed.add_field(
+        name=".ship <@user>",
+        value="Relationship score 💞",
+        inline=True
+    )
 
     embed.set_footer(text="Amounts: 1k = 1,000 | 1m = 1,000,000 | half = 50% wallet | all = full wallet")
     await ctx.send(embed=embed)
