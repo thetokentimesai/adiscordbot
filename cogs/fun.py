@@ -4,7 +4,6 @@ cogs/fun.py – Fun percentage commands with deterministic weekly RNG.
 Commands: .gaybar, .ship, .susmeter, .nerdrate
 """
 
-from utils.economy_utils import error_embed
 from __future__ import annotations
 
 import discord
@@ -12,6 +11,7 @@ from discord.ext import commands
 
 import config
 from utils.rng import gaybar_percent, susmeter_percent, nerdrate_percent, ship_percent
+from utils.economy_utils import error_embed
 
 
 # ── Progress bar helper ────────────────────────────────────────────────────────
