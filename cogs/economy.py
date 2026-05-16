@@ -13,25 +13,13 @@ Changes:
 from __future__ import annotations
 
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 import discord
 from discord.ext import commands
 
 import config
 from database import db
-from utils.cooldowns import (
-    check_daily_cooldown, check_hourly_cooldown,
-    check_work_cooldown, check_sidequest_cooldown,
-    check_weekly_cooldown, check_monthly_cooldown,
-    format_remaining,
-)
-from utils.economy_utils import fmt, error_embed, success_embed
-
-# ADD these imports in cogs/economy.py
-
-from datetime import datetime, timezone, timedelta
-
 from utils.cooldowns import (
     check_daily_cooldown,
     check_hourly_cooldown,
@@ -44,8 +32,7 @@ from utils.cooldowns import (
     check_heist_cooldown,
     format_remaining,
 )
-
-from datetime import datetime, timezone
+from utils.economy_utils import fmt, error_embed, success_embed
 
 WORK_MESSAGES = [
     "You fixed some bugs and got paid",
@@ -345,32 +332,7 @@ class Economy(commands.Cog):
             f"Withdrew **{fmt(coins)}** to your wallet.\n\nWallet: {fmt(row['wallet'])}  |  Bank: {fmt(row['bank'])}",
         ))
 
-    # ── .pay ───────────────────────────────────────────────────────────────────
-
-    @commands.command(name="pay", help="Pay another user. Usage: .pay <@user> <amount>")
-    async def pay(self, ctx: commands.Context, recipient: discord.Member = None, amount: str = None):
-        if recipient is None or amount is None:
-            return await ctx.send(embed=error_embed("Usage: `.pay <@user> <amount>` (e.g. `.pay @user 1k`)"))
-        parsed = parse_amount(amount)
-        if parsed is None or parsed == "all" or parsed < 1:
-            return await ctx.send(embed=error_embed("Invalid amount. Try `100`, `1k`, `1.5m`."))
-        sender_id = ctx.author.id
-        recipient_id = recipient.id
-        if recipient_id == sender_id:
-            return await ctx.send(embed=error_embed("You can't pay yourself."))
-        if recipient.bot:
-            return await ctx.send(embed=error_embed("You can't pay a bot."))
-        sender_row = await db.get_user(sender_id)
-        if parsed > sender_row["wallet"]:
-            return await ctx.send(embed=error_embed(f"You only have {fmt(sender_row['wallet'])} in your wallet."))
-        await db.add_wallet(sender_id,    -parsed, reason=f"paid {recipient_id}")
-        await db.add_wallet(recipient_id,  parsed, reason=f"received from {sender_id}")
-        await ctx.send(embed=success_embed(
-            "💸  Payment Sent",
-            f"{ctx.author.mention} paid {recipient.mention} **{fmt(parsed)}**!",
-        ))
-
-        # ADD THIS COMMAND inside Economy class
+    # ── .send / .pay ───────────────────────────────────────────────────────────
 
     @commands.command(name="send", aliases=["pay"], help="Send money to another user.")
     async def send(self, ctx: commands.Context, member: discord.Member = None, amount: str = None):
