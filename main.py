@@ -42,14 +42,14 @@ async def help_command(ctx: commands.Context):
         inline=True
     )
     embed.add_field(
-    name="💀 Crime",
-    value=(
-        "`.rob <@user>` - Attempt to rob someone\n"
-        "`.steal <@user>` - Attempt to steal coins\n"
-        "`.heist <target>` - Attempt a risky heist"
-    ),
-    inline=False
-)
+        name="💀 Crime",
+        value=(
+            "`.rob <@user>` - Attempt to rob someone\n"
+            "`.steal <@user>` - Attempt to steal coins\n"
+            "`.heist <target>` - Attempt a risky heist"
+        ),
+        inline=False,
+    )
 
     # ── Rewards ────────────────────────────────────────────────────────────────
     embed.add_field(name="\u200b", value="**🎁 Rewards**", inline=False)
