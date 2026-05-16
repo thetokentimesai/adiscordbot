@@ -8,7 +8,7 @@ Changes:
   - Schema init includes last_weekly, last_monthly columns
 """
 
-import asyncio
+# import asyncio
 import asyncpg
 import logging
 from typing import Optional
@@ -24,14 +24,14 @@ async def _get_pool() -> asyncpg.Pool:
     global _pool
     if _pool is None:
         import config
-        _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=1, max_size=5)
+        _pool = await asyncpg.create_pool(config.DATABASE_URL, min_size=1, max_size=5, ssl="require")
         log.info("PostgreSQL connection pool created.")
     return _pool
 
 
-def init_db() -> None:
+async def init_db() -> None:
     """Create tables — called once at bot startup."""
-    asyncio.get_event_loop().run_until_complete(_init_db_async())
+    await _init_db_async()
 
 
 async def _init_db_async() -> None:
