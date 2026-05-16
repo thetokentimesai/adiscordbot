@@ -111,7 +111,7 @@ async def help_command(ctx: commands.Context):
 async def on_ready():
     print(f"Logged in as {bot.user}")
     try:
-        db.init_db()
+        await db.init_db()
         print("Database initialized.")
     except Exception as e:
         print(f"Database init error: {e}")
