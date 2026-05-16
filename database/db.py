@@ -8,6 +8,7 @@ Changes:
   - Schema init includes last_weekly, last_monthly columns
 """
 
+import asyncio
 import asyncpg
 import logging
 from typing import Optional
