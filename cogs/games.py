@@ -102,18 +102,24 @@ def _spin_slots() -> tuple[list[str], float]:
 
 # ── Blackjack card display ─────────────────────────────────────────────────────
 
-SUIT_EMOJI = {"♠": "♠️", "♥": "♥️", "♦": "♦️", "♣": "♣️"}
+# Unicode playing card characters (U+1F0A0 block)
+_SUIT_BASE = {"♠": 0x1F0A0, "♥": 0x1F0B0, "♦": 0x1F0C0, "♣": 0x1F0D0}
+_RANK_OFFSET = {
+    "A": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
+    "8": 8, "9": 9, "10": 10, "J": 11, "Q": 13, "K": 14,
+}
 
 def _card_str(card) -> str:
-    """Render a single card as e.g. `A♥️` `10♠️`"""
-    return f"`{card.rank}{SUIT_EMOJI[card.suit]}`"
+    """Render a card as its Unicode playing card character e.g. 🂡 🃊"""
+    cp = _SUIT_BASE[card.suit] + _RANK_OFFSET[card.rank]
+    return chr(cp)
 
 def _hand_str(cards) -> str:
-    return "  ".join(_card_str(c) for c in cards)
+    return " ".join(_card_str(c) for c in cards)
 
 def _hidden_hand_str(cards) -> str:
-    """Show first card + face-down card for dealer during play."""
-    return f"{_card_str(cards[0])}  `🂠`"
+    """Show first card + face-down card (🂠) for dealer during play."""
+    return f"{_card_str(cards[0])} 🂠"
 
 
 # ── Blackjack embed builders ───────────────────────────────────────────────────
@@ -121,13 +127,8 @@ def _hidden_hand_str(cards) -> str:
 def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
     embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
     embed.add_field(
-        name=f"🤖 Dealer  (?)",
-        value=_hidden_hand_str(game.dealer_cards),
-        inline=False,
-    )
-    embed.add_field(
-        name=f"👤 You  ({game.player_total})",
-        value=_hand_str(game.player_cards),
+        name="​",
+        value=f"🤖 Dealer: {_hidden_hand_str(game.dealer_cards)} = ?\n👤 You: {_hand_str(game.player_cards)} = {game.player_total}",
         inline=False,
     )
     embed.set_footer(text=f"Bet: {fmt(game.bet)}  •  Hit or Stand?")
@@ -135,34 +136,42 @@ def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
 
 
 def _bj_embed(game: BlackjackGame, outcome: Outcome, delta: int, timed_out: bool = False) -> discord.Embed:
-    labels = {
-        Outcome.PLAYER_WIN: ("🎉  YOU WON",     config.COLOR_SUCCESS),
-        Outcome.DEALER_WIN: ("❌  Dealer Wins", config.COLOR_ERROR),
-        Outcome.PUSH:       ("🤝  Push — Tie",  config.COLOR_INFO),
-        Outcome.BLACKJACK:  ("🎉  BLACKJACK!",  config.COLOR_GOLD),
-        Outcome.BUST:       ("💥  You Bust!",   config.COLOR_ERROR),
+    result_labels = {
+        Outcome.PLAYER_WIN: ("🎉 YOU WON",    config.COLOR_SUCCESS),
+        Outcome.DEALER_WIN: ("💀 You Lost",   config.COLOR_ERROR),
+        Outcome.PUSH:       ("🤝 Push — Tie", config.COLOR_INFO),
+        Outcome.BLACKJACK:  ("🎉 BLACKJACK!", config.COLOR_GOLD),
+        Outcome.BUST:       ("💀 You Lost",   config.COLOR_ERROR),
     }
-    result_label, color = labels[outcome]
+    earned_labels = {
+        Outcome.PLAYER_WIN: "💰 Earned",
+        Outcome.DEALER_WIN: "💸 Lost",
+        Outcome.PUSH:       "💰 Earned",
+        Outcome.BLACKJACK:  "💰 Earned",
+        Outcome.BUST:       "💸 Lost",
+    }
+    result_label, color = result_labels[outcome]
+    earned_label = earned_labels[outcome]
     if timed_out:
-        result_label = f"⏰ Timed Out"
+        result_label = "⏰ Timed Out"
+
+    # Bust / dealer win shows card total; bust gets a marker appended
+    bust_marker = "  · 💥 BUST!" if outcome == Outcome.BUST else ""
+    you_line    = f"{_hand_str(game.player_cards)}  =  {game.player_total}{bust_marker}"
+    dealer_line = f"{_hand_str(game.dealer_cards)}  =  {game.dealer_total}"
 
     embed = discord.Embed(title="🃏  Blackjack", color=color)
     embed.add_field(
-        name=f"🤖 Dealer  ({game.dealer_total})",
-        value=_hand_str(game.dealer_cards),
-        inline=False,
-    )
-    embed.add_field(
-        name=f"👤 You  ({game.player_total})",
-        value=_hand_str(game.player_cards),
+        name="​",
+        value=f"🤖 Dealer: {dealer_line}\n👤 You: {you_line}",
         inline=False,
     )
     embed.add_field(name="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
 
     sign = "+" if delta > 0 else ""
     earned_str = f"{sign}{fmt(delta)}" if delta != 0 else "—"
-    embed.add_field(name="📊 Result",  value=result_label,  inline=True)
-    embed.add_field(name="💰 Earned",  value=earned_str,    inline=True)
+    embed.add_field(name="📊 Result",   value=result_label, inline=True)
+    embed.add_field(name=earned_label,  value=earned_str,   inline=True)
     embed.set_footer(text=f"Bet: {fmt(game.bet)}")
     return embed
 
