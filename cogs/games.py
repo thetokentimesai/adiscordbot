@@ -102,24 +102,18 @@ def _spin_slots() -> tuple[list[str], float]:
 
 # ── Blackjack card display ─────────────────────────────────────────────────────
 
-# Unicode playing card characters (U+1F0A0 block)
-_SUIT_BASE = {"♠": 0x1F0A0, "♥": 0x1F0B0, "♦": 0x1F0C0, "♣": 0x1F0D0}
-_RANK_OFFSET = {
-    "A": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7,
-    "8": 8, "9": 9, "10": 10, "J": 11, "Q": 13, "K": 14,
-}
+SUIT_EMOJI = {"♠": "♠", "♥": "♥", "♦": "♦", "♣": "♣"}
 
 def _card_str(card) -> str:
-    """Render a card as its Unicode playing card character e.g. 🂡 🃊"""
-    cp = _SUIT_BASE[card.suit] + _RANK_OFFSET[card.rank]
-    return chr(cp)
+    """Render a card as rank + suit e.g. A ♠  10 ♦"""
+    return f"{card.rank} {SUIT_EMOJI[card.suit]}"
 
 def _hand_str(cards) -> str:
-    return " ".join(_card_str(c) for c in cards)
+    return "  ".join(_card_str(c) for c in cards)
 
 def _hidden_hand_str(cards) -> str:
-    """Show first card + face-down card (🂠) for dealer during play."""
-    return f"{_card_str(cards[0])} 🂠"
+    """Show first card + face-down card for dealer during play."""
+    return f"{_card_str(cards[0])}  🂠"
 
 
 # ── Blackjack embed builders ───────────────────────────────────────────────────
