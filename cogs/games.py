@@ -1,14 +1,11 @@
 """
 cogs/games.py – Gambling commands, interactive Blackjack, and Horse Racing.
 
-Commands: .coinflip/.cf, .slots, .dice/.dc, .blackjack/.bj, .horserace/.hr
-
 Changes:
-  - All bet commands accept: <amount|half|all> (e.g. .cf half h, .bj all)
-  - .coinflip accepts shorthand: h/t for heads/tails, and flexible arg order
-    (.cf 100 h, .cf h 100, .cf 100 heads, .cf tails 500 — all valid)
-  - .horserace: multiplayer race with fixed 500-coin entry, dramatic live updates
-  - Wallet can never go negative (enforced before every deduction)
+  - BJ: Double button removed; Push bug fixed (no money lost on draw)
+  - BJ: 2-second reveal for coinflip result
+  - Restyled embeds matching reference screenshots
+  - Horse race shows horse names and owner before race starts
 """
 
 from __future__ import annotations
@@ -28,14 +25,12 @@ from utils.blackjack import BlackjackGame, Outcome, cards_str
 
 from datetime import datetime, timezone
 
-# Gambling cooldown in seconds (prevents spam)
-GAMBLE_COOLDOWN = 5
-
-# Horse race constants
-RACE_BUY_IN    = 500        # fixed entry fee
-RACE_JOIN_TIME = 30         # seconds to gather players
+GAMBLE_COOLDOWN  = 5
+RACE_BUY_IN      = 500
+RACE_JOIN_TIME   = 30
 RACE_MIN_PLAYERS = 2
 RACE_MAX_PLAYERS = 6
+RACE_TRACK_LEN   = 20
 
 HORSE_NAMES = [
     ("🐴", "Dusty Hooves"),
@@ -46,17 +41,21 @@ HORSE_NAMES = [
     ("🐴", "Midnight Runner"),
 ]
 
-RACE_TRACK_LEN = 20   # total track positions
+DRAMATIC_EVENTS = [
+    "{horse} trips on a pebble! 😱",
+    "{horse} gets a second wind! 💨",
+    "{horse} is overtaken — wait, they're surging back! 😤",
+    "{horse} winks at the crowd! 😎",
+    "{horse} spots a carrot at the finish line! 🥕",
+    "{horse} slips on a banana peel! 🍌",
+    "{horse} steals the lead! 🔥",
+    "{horse} is looking TIRED… 😮‍💨",
+]
 
 
 # ── Bet parsing ────────────────────────────────────────────────────────────────
 
 def parse_bet(raw: str, wallet: int) -> Optional[int]:
-    """
-    Parse a bet string into an integer coin amount.
-    Accepts: 100, 1k, 1.5m, half, all
-    Returns None if invalid or <= 0.
-    """
     raw = raw.lower().strip()
     if raw == "all":
         return wallet
@@ -76,16 +75,10 @@ def parse_bet(raw: str, wallet: int) -> Optional[int]:
         return None
 
 
-def parse_cf_args(args: tuple[str, ...]) -> tuple[Optional[int], Optional[str], Optional[int]]:
-    """
-    Parse coinflip args in any order: amount side or side amount.
-    Returns (raw_amount_str, side, wallet_placeholder).
-    Side accepts: h, t, heads, tails.
-    Returns (amount_str, side) or (None, None) on failure.
-    """
+def parse_cf_args(args: tuple[str, ...]) -> tuple[Optional[str], Optional[str]]:
     SIDE_MAP = {"h": "heads", "t": "tails", "heads": "heads", "tails": "tails"}
     amount_str = None
-    side = None
+    side       = None
     for arg in args:
         if arg.lower() in SIDE_MAP:
             side = SIDE_MAP[arg.lower()]
@@ -96,36 +89,76 @@ def parse_cf_args(args: tuple[str, ...]) -> tuple[Optional[int], Optional[str], 
 
 # ── Slots helpers ──────────────────────────────────────────────────────────────
 
-SLOT_EMOJIS = ["🍒", "🍋", "🍉", "⭐", "💎", "7️⃣"]
-
-SLOT_PAYOUTS: dict[str, float] = {
-    "💎": 10.0,
-    "7️⃣": 7.0,
-    "⭐": 4.0,
-    "🍉": 3.0,
-    "🍋": 2.0,
-    "🍒": 1.5,
-}
+SLOT_EMOJIS   = ["🍒", "🍋", "🍉", "⭐", "💎", "7️⃣"]
+SLOT_PAYOUTS  = {"💎": 10.0, "7️⃣": 7.0, "⭐": 4.0, "🍉": 3.0, "🍋": 2.0, "🍒": 1.5}
 
 
 def _spin_slots() -> tuple[list[str], float]:
-    """Spin 3 reels. Returns (reels, multiplier) where multiplier=0 means loss."""
     reels = [random.choice(SLOT_EMOJIS) for _ in range(3)]
     if reels[0] == reels[1] == reels[2]:
         return reels, SLOT_PAYOUTS.get(reels[0], 1.5)
     return reels, 0.0
 
 
-# ── Blackjack buttons ──────────────────────────────────────────────────────────
+# ── Blackjack embed builders ───────────────────────────────────────────────────
+
+def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
+    embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
+    embed.add_field(
+        name=f"🤖 Dealer's hand  (?)",
+        value=f"{game.dealer_cards[0][0]}{game.dealer_cards[0][1]}  🂠",
+        inline=False,
+    )
+    embed.add_field(
+        name=f"👤 Your hand  ({game.player_total})",
+        value=cards_str(game.player_cards),
+        inline=False,
+    )
+    embed.set_footer(text=f"Bet: {fmt(game.bet)}  •  Hit or Stand?")
+    return embed
+
+
+def _bj_embed(game: BlackjackGame, outcome: Outcome, delta: int, timed_out: bool = False) -> discord.Embed:
+    labels = {
+        Outcome.PLAYER_WIN: ("✅  You Win!",      config.COLOR_SUCCESS),
+        Outcome.DEALER_WIN: ("❌  Dealer Wins!",  config.COLOR_ERROR),
+        Outcome.PUSH:       ("🤝  Push — Tie!",   config.COLOR_INFO),
+        Outcome.BLACKJACK:  ("🎉  BLACKJACK!",    config.COLOR_GOLD),
+        Outcome.BUST:       ("💥  You Bust!",     config.COLOR_ERROR),
+    }
+    title, color = labels[outcome]
+    if timed_out:
+        title = f"⏰ Timed Out — {title}"
+
+    embed = discord.Embed(title=title, color=color)
+    embed.add_field(
+        name=f"🤖 Dealer  ({game.dealer_total})",
+        value=cards_str(game.dealer_cards),
+        inline=False,
+    )
+    embed.add_field(
+        name=f"👤 You  ({game.player_total})",
+        value=cards_str(game.player_cards),
+        inline=False,
+    )
+    embed.add_field(name="━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
+
+    sign = "+" if delta > 0 else ""
+    embed.add_field(name="📊 Result",  value=title.split("—")[0].strip() if "—" in title else title, inline=True)
+    embed.add_field(name="💵 Earned",  value=f"{sign}{fmt(delta)}" if delta != 0 else "—",           inline=True)
+    embed.set_footer(text=f"Bet: {fmt(game.bet)}")
+    return embed
+
+
+# ── Blackjack View (Hit / Stand only) ─────────────────────────────────────────
 
 class BlackjackView(discord.ui.View):
-    def __init__(self, game: BlackjackGame, player: discord.Member, wallet: int):
+    def __init__(self, game: BlackjackGame, player: discord.Member):
         super().__init__(timeout=60)
-        self.game      = game
-        self.player    = player
-        self.wallet    = wallet
+        self.game    = game
+        self.player  = player
         self.message: Optional[discord.Message] = None
-        self._ended    = False
+        self._ended  = False
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.player.id:
@@ -138,13 +171,13 @@ class BlackjackView(discord.ui.View):
             self._ended = True
             self._disable_all()
             outcome, delta = self.game.resolve()
-            await db.add_wallet(self.player.id, delta, reason="blackjack timeout-stand")
+            await db.add_wallet(self.player.id, delta, reason="blackjack timeout stand")
             embed = _bj_embed(self.game, outcome, delta, timed_out=True)
             await self.message.edit(embed=embed, view=self)
 
     def _disable_all(self) -> None:
         for child in self.children:
-            child.disabled = True  # type: ignore[attr-defined]
+            child.disabled = True
 
     @discord.ui.button(label="Hit", style=discord.ButtonStyle.primary, emoji="🃏")
     async def hit_button(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -152,6 +185,7 @@ class BlackjackView(discord.ui.View):
         if self.game.player_busted:
             self._ended = True
             self._disable_all()
+            # Bet was already deducted; bust means we lose it (delta = -bet)
             await db.add_wallet(self.player.id, -self.game.bet, reason="blackjack bust")
             embed = _bj_embed(self.game, Outcome.BUST, -self.game.bet)
             await interaction.response.edit_message(embed=embed, view=self)
@@ -170,83 +204,16 @@ class BlackjackView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=self)
         self.stop()
 
-    @discord.ui.button(label="Double", style=discord.ButtonStyle.danger, emoji="💥")
-    async def double_button(self, button: discord.ui.Button, interaction: discord.Interaction):
-        if len(self.game.player_cards) != 2:
-            await interaction.response.send_message("You can only double on your first two cards!", ephemeral=True)
-            return
-        row = await db.get_user(self.player.id)
-        extra = min(self.game.bet, row["wallet"])
-        if extra <= 0:
-            await interaction.response.send_message("Not enough coins to double!", ephemeral=True)
-            return
-        await db.add_wallet(self.player.id, -extra, reason="blackjack double extra bet")
-        self.game.double_down(extra)
-        self._ended = True
-        self._disable_all()
-        outcome, delta = self.game.resolve()
-        await db.add_wallet(self.player.id, delta, reason=f"blackjack double {outcome.name.lower()}")
-        embed = _bj_embed(self.game, outcome, delta, doubled=True)
-        await interaction.response.edit_message(embed=embed, view=self)
-        self.stop()
-
-
-# ── Blackjack embed builders ───────────────────────────────────────────────────
-
-def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
-    embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
-    embed.add_field(name=f"Your hand  ({game.player_total})", value=cards_str(game.player_cards), inline=False)
-    embed.add_field(name="Dealer's hand  (?)", value=f"{game.dealer_cards[0]}  🂠", inline=False)
-    embed.set_footer(text=f"Bet: {fmt(game.bet)}")
-    return embed
-
-
-def _bj_embed(game, outcome, delta, doubled=False, timed_out=False) -> discord.Embed:
-    labels = {
-        Outcome.PLAYER_WIN: ("✅  You Win!", config.COLOR_SUCCESS),
-        Outcome.DEALER_WIN: ("❌  Dealer Wins!", config.COLOR_ERROR),
-        Outcome.PUSH:       ("🤝  Push!", config.COLOR_INFO),
-        Outcome.BLACKJACK:  ("🎉  BLACKJACK!", config.COLOR_GOLD),
-        Outcome.BUST:       ("💥  You Bust!", config.COLOR_ERROR),
-    }
-    title, color = labels[outcome]
-    if timed_out:
-        title = f"⏰  Timed Out – {title}"
-    embed = discord.Embed(title=title, color=color)
-    embed.add_field(name=f"Your hand  ({game.player_total})", value=cards_str(game.player_cards), inline=False)
-    embed.add_field(name=f"Dealer's hand  ({game.dealer_total})", value=cards_str(game.dealer_cards), inline=False)
-    sign  = "+" if delta >= 0 else ""
-    extra = "  (Doubled)" if doubled else ""
-    embed.add_field(name="Result", value=f"**{sign}{fmt(delta)}**{extra}", inline=False)
-    return embed
-
 
 # ── Horse Race helpers ─────────────────────────────────────────────────────────
 
 def _render_track(positions: dict[int, int], horses: list[tuple[str, str, int]]) -> str:
-    """
-    Build a text race track.
-    horses: list of (emoji, name, user_id)
-    positions: user_id -> track position (0-RACE_TRACK_LEN)
-    """
     lines = []
     for emoji, name, uid in horses:
-        pos = positions[uid]
+        pos   = positions[uid]
         track = "─" * pos + emoji + "─" * (RACE_TRACK_LEN - pos) + "🏁"
         lines.append(f"`{track}` **{name}**")
     return "\n".join(lines)
-
-
-DRAMATIC_EVENTS = [
-    "{horse} trips on a pebble! 😱",
-    "{horse} gets a second wind! 💨",
-    "{horse} is overtaken — wait, they're surging back! 😤",
-    "{horse} winks at the crowd! 😎",
-    "{horse} spots a carrot at the finish line! 🥕",
-    "{horse} slips on a banana peel! 🍌",
-    "{horse} steals the lead!  🔥",
-    "{horse} is looking TIRED… 😮‍💨",
-]
 
 
 # ── Horse Race join view ───────────────────────────────────────────────────────
@@ -266,20 +233,17 @@ class JoinRaceView(discord.ui.View):
             return await interaction.response.send_message("You're already in!", ephemeral=True)
         if len(self.players) >= RACE_MAX_PLAYERS:
             return await interaction.response.send_message("Race is full!", ephemeral=True)
-
-        # Check wallet
         row = await db.get_user(member.id)
         if row["wallet"] < RACE_BUY_IN:
             return await interaction.response.send_message(
                 f"You need {fmt(RACE_BUY_IN)} in your wallet to join!", ephemeral=True
             )
-
         self.players.append(member)
-        names = ", ".join(f"**{p.display_name}**" for p in self.players)
+        names = "\n".join(f"• **{p.display_name}**" for p in self.players)
         embed = self.message.embeds[0]
-        embed.set_field_at(0, name="Riders", value=names, inline=False)
-        embed.set_field_at(1, name="Entry", value=fmt(RACE_BUY_IN), inline=True)
-        embed.set_field_at(2, name="Prize Pool", value=fmt(RACE_BUY_IN * len(self.players)), inline=True)
+        embed.set_field_at(0, name="🏇 Riders",   value=names,                                  inline=True)
+        embed.set_field_at(1, name="💰 Entry",     value=fmt(RACE_BUY_IN),                       inline=True)
+        embed.set_field_at(2, name="🏆 Prize Pool",value=fmt(RACE_BUY_IN * len(self.players)),   inline=True)
         await interaction.response.edit_message(embed=embed, view=self)
 
     async def on_timeout(self):
@@ -292,11 +256,9 @@ class JoinRaceView(discord.ui.View):
 # ── Cog ────────────────────────────────────────────────────────────────────────
 
 class Games(commands.Cog):
-    """Gambling and interactive game commands."""
-
     def __init__(self, bot: commands.Bot) -> None:
-        self.bot = bot
-        self._active_races: set[int] = set()  # channel IDs with active races
+        self.bot          = bot
+        self._active_races: set[int] = set()
 
     def _check_gamble_cooldown(self, user_id: int) -> Optional[str]:
         if is_on_cooldown(user_id, "gamble"):
@@ -304,30 +266,20 @@ class Games(commands.Cog):
             return f"Slow down! Wait **{format_remaining(remaining)}** before gambling again."
         return None
 
-    async def _check_jail(self, user_id: int):
+    async def _check_jail(self, user_id: int) -> Optional[str]:
         row = await db.get_user(user_id)
         if not row["jail_until"]:
             return None
-        jail_until = datetime.fromisoformat(
-            row["jail_until"]
-        ).replace(tzinfo=timezone.utc)
-        # Jail expired
+        jail_until = datetime.fromisoformat(row["jail_until"]).replace(tzinfo=timezone.utc)
         if datetime.now(tz=timezone.utc) >= jail_until:
-            await db.set_jail_until(
-                user_id,
-                None
-            )
+            await db.set_jail_until(user_id, None)
             return None
-        remaining = (
-            jail_until - datetime.now(tz=timezone.utc)
-        ).total_seconds()
+        remaining = (jail_until - datetime.now(tz=timezone.utc)).total_seconds()
         return format_remaining(remaining)
 
     # ── .coinflip ──────────────────────────────────────────────────────────────
-    # Accepts any order: .cf 100 h | .cf h 100 | .cf half tails | .cf all t
 
-    @commands.command(name="coinflip", aliases=["cf"],
-                      help="Flip a coin. Usage: .cf <amount|half|all> <h|t|heads|tails> (order flexible)")
+    @commands.command(name="coinflip", aliases=["cf"])
     async def coinflip(self, ctx: commands.Context, *args: str):
         if len(args) < 2:
             return await ctx.send(embed=error_embed(
@@ -339,18 +291,28 @@ class Games(commands.Cog):
         if side is None:
             return await ctx.send(embed=error_embed("Pick a side: `h`/`heads` or `t`/`tails`."))
         if amount_str is None:
-            return await ctx.send(embed=error_embed("Provide a bet amount: e.g. `500`, `half`, `all`."))
+            return await ctx.send(embed=error_embed("Provide a bet amount."))
 
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
             return await ctx.send(embed=error_embed(msg))
 
-        row = await db.get_user(user_id)
+        row    = await db.get_user(user_id)
         amount = parse_bet(amount_str, row["wallet"])
         if amount is None:
-            return await ctx.send(embed=error_embed("Invalid amount. Try `500`, `1k`, `half`, or `all`."))
+            return await ctx.send(embed=error_embed("Invalid amount."))
         if not await validate_bet(ctx, amount, row["wallet"]):
             return
+
+        # ── 2-second suspense reveal ───────────────────────────────────────────
+        suspense = discord.Embed(
+            title="🪙  Flipping…",
+            description=f"You chose: **{side.capitalize()}**\n🔄 The coin is in the air…",
+            color=config.COLOR_INFO,
+        )
+        suspense.add_field(name="💵 Bet", value=fmt(amount), inline=True)
+        msg_obj = await ctx.send(embed=suspense)
+        await asyncio.sleep(2)
 
         result = random.choice(["heads", "tails"])
         won    = result == side
@@ -358,39 +320,47 @@ class Games(commands.Cog):
 
         if won:
             await db.add_wallet(user_id, amount, reason="coinflip win")
+            row = await db.get_user(user_id)
             embed = discord.Embed(
-                title=f"{coin_emoji}  {result.capitalize()} — You Win!",
-                description=f"**+{fmt(amount)}** added to your wallet.",
+                title=f"{coin_emoji}  Coinflip",
                 color=config.COLOR_SUCCESS,
             )
         else:
             await db.add_wallet(user_id, -amount, reason="coinflip loss")
+            row = await db.get_user(user_id)
             embed = discord.Embed(
-                title=f"{coin_emoji}  {result.capitalize()} — You Lose!",
-                description=f"**-{fmt(amount)}** removed from your wallet.",
+                title=f"{coin_emoji}  Coinflip",
                 color=config.COLOR_ERROR,
             )
 
-        embed.set_footer(text=f"You bet: {side.capitalize()}  |  Result: {result.capitalize()}")
+        embed.description = (
+            f"🎰 🎰 🎰\n\n"
+            f"The coin landed on **{result.upper()}!**\n"
+            f"*You chose: {side.capitalize()}*"
+        )
+        embed.add_field(name="━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
+        embed.add_field(name="📊 Result", value="🎉 You Won"  if won else "💀 You Lost", inline=True)
+        embed.add_field(name="💵 " + ("Earned" if won else "Lost"), value=("+" if won else "-") + fmt(amount), inline=True)
+        embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
+        embed.set_thumbnail(url=ctx.author.display_avatar.url)
+
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
         await db.add_xp(user_id, config.XP_PER_COMMAND)
-        await ctx.send(embed=embed)
+        await msg_obj.edit(embed=embed)
 
     # ── .slots ─────────────────────────────────────────────────────────────────
 
-    @commands.command(name="slots", help="Spin the slot machine! Usage: .slots <amount|half|all>")
+    @commands.command(name="slots")
     async def slots(self, ctx: commands.Context, amount: str = None):
         if amount is None:
             return await ctx.send(embed=error_embed("Usage: `.slots <amount|half|all>`"))
-
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
             return await ctx.send(embed=error_embed(msg))
-
-        row = await db.get_user(user_id)
+        row    = await db.get_user(user_id)
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
-            return await ctx.send(embed=error_embed("Invalid amount. Try `500`, `1k`, `half`, or `all`."))
+            return await ctx.send(embed=error_embed("Invalid amount."))
         if not await validate_bet(ctx, parsed, row["wallet"]):
             return
 
@@ -400,21 +370,26 @@ class Games(commands.Cog):
         if multiplier > 0:
             winnings = int(parsed * multiplier) - parsed
             await db.add_wallet(user_id, winnings, reason="slots win")
+            row = await db.get_user(user_id)
             embed = discord.Embed(
                 title=f"🎰  [ {reel_display} ]",
-                description=(
-                    f"**JACKPOT!** {reels[0]} × {multiplier}x\n"
-                    f"**+{fmt(winnings)}** net winnings!"
-                ),
+                description=f"**JACKPOT!** {reels[0]} × {multiplier}x",
                 color=config.COLOR_GOLD,
             )
+            embed.add_field(name="📊 Result",  value="🎉 You Won",      inline=True)
+            embed.add_field(name="💵 Earned",  value=f"+{fmt(winnings)}", inline=True)
+            embed.add_field(name="💳 Balance", value=fmt(row["wallet"]),  inline=True)
         else:
             await db.add_wallet(user_id, -parsed, reason="slots loss")
+            row = await db.get_user(user_id)
             embed = discord.Embed(
                 title=f"🎰  [ {reel_display} ]",
-                description=f"No match. **-{fmt(parsed)}** lost.",
+                description="No match!",
                 color=config.COLOR_ERROR,
             )
+            embed.add_field(name="📊 Result",  value="💀 You Lost",      inline=True)
+            embed.add_field(name="💵 Lost",    value=f"-{fmt(parsed)}",   inline=True)
+            embed.add_field(name="💳 Balance", value=fmt(row["wallet"]),  inline=True)
 
         embed.set_footer(text=f"Bet: {fmt(parsed)}")
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
@@ -423,19 +398,17 @@ class Games(commands.Cog):
 
     # ── .dice ──────────────────────────────────────────────────────────────────
 
-    @commands.command(name="dice", aliases=["dc"], help="Roll a dice vs the bot. Usage: .dice <amount|half|all>")
+    @commands.command(name="dice", aliases=["dc"])
     async def dice(self, ctx: commands.Context, amount: str = None):
         if amount is None:
             return await ctx.send(embed=error_embed("Usage: `.dice <amount|half|all>`"))
-
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
             return await ctx.send(embed=error_embed(msg))
-
-        row = await db.get_user(user_id)
+        row    = await db.get_user(user_id)
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
-            return await ctx.send(embed=error_embed("Invalid amount. Try `500`, `1k`, `half`, or `all`."))
+            return await ctx.send(embed=error_embed("Invalid amount."))
         if not await validate_bet(ctx, parsed, row["wallet"]):
             return
 
@@ -444,41 +417,48 @@ class Games(commands.Cog):
 
         if player_roll > bot_roll:
             await db.add_wallet(user_id, parsed, reason="dice win")
-            color, result_text = config.COLOR_SUCCESS, f"**You win! +{fmt(parsed)}**"
+            row    = await db.get_user(user_id)
+            color  = config.COLOR_SUCCESS
+            result = f"🎉 You Won  +{fmt(parsed)}"
         elif player_roll < bot_roll:
             await db.add_wallet(user_id, -parsed, reason="dice loss")
-            color, result_text = config.COLOR_ERROR, f"**You lose! -{fmt(parsed)}**"
+            row    = await db.get_user(user_id)
+            color  = config.COLOR_ERROR
+            result = f"💀 You Lost  -{fmt(parsed)}"
         else:
-            color, result_text = config.COLOR_INFO, "**Tie! No coins exchanged.**"
+            row    = await db.get_user(user_id)
+            color  = config.COLOR_INFO
+            result = "🤝 Tie!  No coins exchanged."
 
         embed = discord.Embed(title="🎲  Dice Roll", color=color)
-        embed.add_field(name=f"You: {player_roll}", value="🎲", inline=True)
-        embed.add_field(name=f"Bot: {bot_roll}",    value="🎲", inline=True)
-        embed.add_field(name="Result", value=result_text, inline=False)
-
+        embed.add_field(name="🎲 You",    value=str(player_roll), inline=True)
+        embed.add_field(name="🤖 Bot",    value=str(bot_roll),    inline=True)
+        embed.add_field(name="📊 Result", value=result,           inline=False)
+        embed.add_field(name="💳 Balance",value=fmt(row["wallet"]),inline=True)
+        embed.set_footer(text=f"Bet: {fmt(parsed)}")
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
         await db.add_xp(user_id, config.XP_PER_COMMAND)
         await ctx.send(embed=embed)
 
     # ── .blackjack ─────────────────────────────────────────────────────────────
 
-    @commands.command(name="blackjack", aliases=["bj"],
-                      help="Play interactive Blackjack! Usage: .bj <amount|half|all>")
+    @commands.command(name="blackjack", aliases=["bj"])
     async def blackjack(self, ctx: commands.Context, amount: str = None):
         if amount is None:
-            return await ctx.send(embed=error_embed("Usage: `.blackjack <amount|half|all>`"))
+            return await ctx.send(embed=error_embed("Usage: `.bj <amount|half|all>`"))
 
         user_id = ctx.author.id
         if msg := self._check_gamble_cooldown(user_id):
             return await ctx.send(embed=error_embed(msg))
 
-        row = await db.get_user(user_id)
+        row    = await db.get_user(user_id)
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
-            return await ctx.send(embed=error_embed("Invalid amount. Try `500`, `1k`, `half`, or `all`."))
+            return await ctx.send(embed=error_embed("Invalid amount."))
         if not await validate_bet(ctx, parsed, row["wallet"]):
             return
 
+        # Deduct bet upfront; resolve() returns a delta to add back
         await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
 
         game = BlackjackGame(bet=parsed)
@@ -486,54 +466,49 @@ class Games(commands.Cog):
 
         if game.is_natural_blackjack:
             payout = int(parsed * 1.5)
+            # Return original bet + 1.5x profit
             await db.add_wallet(user_id, parsed + payout, reason="blackjack natural")
+            row   = await db.get_user(user_id)
             embed = _bj_embed(game, Outcome.BLACKJACK, payout)
+            embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
             return await ctx.send(embed=embed)
 
-        view = BlackjackView(game=game, player=ctx.author, wallet=row["wallet"] - parsed)
+        view = BlackjackView(game=game, player=ctx.author)
         embed = _bj_embed_playing(game)
-
-        msg = await ctx.send(embed=embed, view=view)
+        msg   = await ctx.send(embed=embed, view=view)
         view.message = msg
-
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
 
     # ── .horserace ─────────────────────────────────────────────────────────────
 
-    @commands.command(name="horserace", aliases=["race"],
-                      help=f"Start a horse race! Fixed entry: {RACE_BUY_IN} coins. Winner takes all.")
+    @commands.command(name="horserace", aliases=["race"])
     async def horserace(self, ctx: commands.Context):
         channel_id = ctx.channel.id
         if channel_id in self._active_races:
             return await ctx.send(embed=error_embed("A race is already running in this channel!"))
 
-        # Check host wallet
         host_row = await db.get_user(ctx.author.id)
         if host_row["wallet"] < RACE_BUY_IN:
-            return await ctx.send(embed=error_embed(
-                f"You need **{fmt(RACE_BUY_IN)}** in your wallet to start a race!"
-            ))
+            return await ctx.send(embed=error_embed(f"You need **{fmt(RACE_BUY_IN)}** to start a race!"))
 
         self._active_races.add(channel_id)
-
-        # ── Lobby ──────────────────────────────────────────────────────────────
-        view = JoinRaceView(host=ctx.author)
-        names = f"**{ctx.author.display_name}**"
+        view  = JoinRaceView(host=ctx.author)
+        names = f"• **{ctx.author.display_name}**"
 
         embed = discord.Embed(
             title="🏇  Horse Race — Join Now!",
             description=(
                 f"A race is starting! Entry fee: **{fmt(RACE_BUY_IN)}**.\n"
-                f"Minimum {RACE_MIN_PLAYERS} riders · Max {RACE_MAX_PLAYERS} riders.\n"
-                f"You have **{RACE_JOIN_TIME}s** to join. Winner takes **all** the coins!"
+                f"Min {RACE_MIN_PLAYERS} · Max {RACE_MAX_PLAYERS} riders.\n"
+                f"You have **{RACE_JOIN_TIME}s** to join. Winner takes **all**!"
             ),
             color=config.COLOR_GOLD,
         )
-        embed.add_field(name="Riders",      value=names,              inline=False)
-        embed.add_field(name="Entry",        value=fmt(RACE_BUY_IN),  inline=True)
-        embed.add_field(name="Prize Pool",   value=fmt(RACE_BUY_IN),  inline=True)
+        embed.add_field(name="🏇 Riders",    value=names,             inline=True)
+        embed.add_field(name="💰 Entry",      value=fmt(RACE_BUY_IN), inline=True)
+        embed.add_field(name="🏆 Prize Pool", value=fmt(RACE_BUY_IN), inline=True)
 
-        lobby_msg = await ctx.send(embed=embed, view=view)
+        lobby_msg   = await ctx.send(embed=embed, view=view)
         view.message = lobby_msg
 
         await asyncio.sleep(RACE_JOIN_TIME)
@@ -543,15 +518,11 @@ class Games(commands.Cog):
         await lobby_msg.edit(view=view)
 
         players = view.players
-
-        # ── Not enough riders ──────────────────────────────────────────────────
         if len(players) < RACE_MIN_PLAYERS:
             self._active_races.discard(channel_id)
-            return await ctx.send(embed=error_embed(
-                f"Not enough riders! Need at least {RACE_MIN_PLAYERS}. Race cancelled."
-            ))
+            return await ctx.send(embed=error_embed("Not enough riders! Race cancelled."))
 
-        # ── Collect entry fees (verify wallets again) ──────────────────────────
+        # Collect entry fees
         valid_players = []
         for p in players:
             row = await db.get_user(p.id)
@@ -559,75 +530,69 @@ class Games(commands.Cog):
                 await db.add_wallet(p.id, -RACE_BUY_IN, reason="horse race entry fee")
                 valid_players.append(p)
             else:
-                await ctx.send(embed=error_embed(
-                    f"{p.mention} doesn't have enough coins and was removed from the race."
-                ))
+                await ctx.send(embed=error_embed(f"{p.mention} doesn't have enough and was removed."))
 
         if len(valid_players) < RACE_MIN_PLAYERS:
-            # Refund those who already paid
             for p in valid_players:
                 await db.add_wallet(p.id, RACE_BUY_IN, reason="horse race refund")
             self._active_races.discard(channel_id)
-            return await ctx.send(embed=error_embed("Not enough valid riders after wallet check. Race cancelled, entry fees refunded."))
+            return await ctx.send(embed=error_embed("Not enough valid riders. Race cancelled, fees refunded."))
 
-        prize_pool = RACE_BUY_IN * len(valid_players)
+        prize_pool     = RACE_BUY_IN * len(valid_players)
+        shuffled       = random.sample(HORSE_NAMES, min(len(valid_players), len(HORSE_NAMES)))
+        horses         = [(emoji, name, p.id) for (emoji, name), p in zip(shuffled, valid_players)]
+        name_map       = {p.id: p.display_name for p in valid_players}
+        horse_display  = {uid: f"{emoji} {hname}" for emoji, hname, uid in horses}
 
-        # Assign horses (pick unique horses for each player)
-        shuffled_horses = random.sample(HORSE_NAMES, min(len(valid_players), len(HORSE_NAMES)))
-        horses = [(emoji, name, p.id) for (emoji, name), p in zip(shuffled_horses, valid_players)]
-
-        # Map player id → display_name
-        name_map = {p.id: p.display_name for p in valid_players}
-        # Map player id → horse display string
-        horse_display = {uid: f"{emoji} {hname}" for emoji, hname, uid in horses}
-
-        # ── Race! ──────────────────────────────────────────────────────────────
-        positions = {uid: 0 for _, _, uid in horses}
-        race_embed = discord.Embed(
-            title="🏇  AND THEY'RE OFF!",
+        # ── Pre-race lineup ────────────────────────────────────────────────────
+        lineup_lines = [
+            f"{horse_display[uid]}  →  **{name_map[uid]}**"
+            for _, _, uid in horses
+        ]
+        lineup_embed = discord.Embed(
+            title="🏇  Race Lineup",
+            description="\n".join(lineup_lines),
             color=config.COLOR_GOLD,
         )
+        lineup_embed.add_field(name="🏆 Prize Pool", value=fmt(prize_pool), inline=True)
+        lineup_embed.set_footer(text="The race starts in 3 seconds…")
+        await ctx.send(embed=lineup_embed)
+        await asyncio.sleep(3)
+
+        # ── Race ──────────────────────────────────────────────────────────────
+        positions  = {uid: 0 for _, _, uid in horses}
+        race_embed = discord.Embed(title="🏇  AND THEY'RE OFF!", color=config.COLOR_GOLD)
         race_embed.description = _render_track(positions, horses)
         race_embed.set_footer(text=f"Prize pool: {fmt(prize_pool)}")
         race_msg = await ctx.send(embed=race_embed)
 
         winner_id = None
-        tick = 0
+        tick      = 0
         while winner_id is None:
             await asyncio.sleep(1.5)
             tick += 1
-
-            # Advance horses by random steps
             for emoji, hname, uid in horses:
-                step = random.randint(0, 3)
-                positions[uid] = min(positions[uid] + step, RACE_TRACK_LEN)
-
-            # Check for winner
+                positions[uid] = min(positions[uid] + random.randint(0, 3), RACE_TRACK_LEN)
             leaders = [uid for uid, pos in positions.items() if pos >= RACE_TRACK_LEN]
             if leaders:
-                winner_id = random.choice(leaders)  # tie-break random
-
-            # Dramatic event every ~3 ticks
+                winner_id = random.choice(leaders)
             drama = ""
             if tick % 3 == 0 and winner_id is None:
-                subject_uid = random.choice([uid for _, _, uid in horses])
-                template = random.choice(DRAMATIC_EVENTS)
-                drama = "\n\n💬 *" + template.format(horse=horse_display[subject_uid]) + "*"
-
+                sub = random.choice([uid for _, _, uid in horses])
+                drama = "\n\n💬 *" + random.choice(DRAMATIC_EVENTS).format(horse=horse_display[sub]) + "*"
             race_embed.description = _render_track(positions, horses) + drama
             if winner_id:
                 race_embed.title = "🏁  FINISH LINE!"
             await race_msg.edit(embed=race_embed)
 
-        # ── Payout ────────────────────────────────────────────────────────────
         await db.add_wallet(winner_id, prize_pool, reason="horse race winner payout")
-        winner_name = name_map[winner_id]
+        winner_name  = name_map[winner_id]
         winner_horse = horse_display[winner_id]
 
         result_embed = discord.Embed(
-            title=f"🏆  {winner_horse} wins the race!",
+            title=f"🏆  {winner_horse} wins!",
             description=(
-                f"**{winner_name}** takes home the prize pool of **{fmt(prize_pool)}**!\n\n"
+                f"**{winner_name}** takes home **{fmt(prize_pool)}**!\n\n"
                 + "\n".join(
                     f"{'🥇' if uid == winner_id else '💀'}  {horse_display[uid]} — {name_map[uid]}"
                     for _, _, uid in horses

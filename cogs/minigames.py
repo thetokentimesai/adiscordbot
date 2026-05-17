@@ -1,23 +1,12 @@
 """
-cogs/minigames.py – Chat-spawned minigames for active channels.
+cogs/minigames.py – Chat-spawned minigames.
 
-Minigames spawn automatically when the chat is active, or can be triggered
-manually. First person to answer correctly wins coins.
-
-Games:
-  - 🚩 Guess the Flag   – name the country from the flag emoji
-  - ➗ Math Challenge    – solve an arithmetic expression
-  - 🔤 Unscramble Word  – unscramble a jumbled word
-  - ❓ Trivia           – answer a general knowledge question
-
-Auto-spawn: after every N messages in a channel (configurable).
-Manual: .minigame / .mg to force-spawn one.
-
-Config keys (add to config.py):
-  MINIGAME_REWARD_MIN  = 100
-  MINIGAME_REWARD_MAX  = 500
-  MINIGAME_AUTO_EVERY  = 25    # spawn after this many messages in a channel
-  MINIGAME_TIMEOUT     = 30    # seconds before question expires
+Changes:
+  - .mg admin-only
+  - .gi removed
+  - Flag games use real flag images from flagcdn.com
+  - Per-player minigame streak tracking
+  - Streak bonus displayed on win
 """
 
 from __future__ import annotations
@@ -33,72 +22,76 @@ from discord.ext import commands
 
 import config
 from database import db
-from utils.economy_utils import fmt, success_embed
+from utils.economy_utils import fmt, error_embed, success_embed
 
-# ── Constants ──────────────────────────────────────────────────────────────────
+REWARD_MIN = getattr(config, "MINIGAME_REWARD_MIN", 100)
+REWARD_MAX = getattr(config, "MINIGAME_REWARD_MAX", 500)
+AUTO_EVERY = getattr(config, "MINIGAME_AUTO_EVERY", 25)
+TIMEOUT    = getattr(config, "MINIGAME_TIMEOUT", 30)
 
-REWARD_MIN    = getattr(config, "MINIGAME_REWARD_MIN", 100)
-REWARD_MAX    = getattr(config, "MINIGAME_REWARD_MAX", 500)
-AUTO_EVERY    = getattr(config, "MINIGAME_AUTO_EVERY", 25)
-TIMEOUT       = getattr(config, "MINIGAME_TIMEOUT", 30)
-
-# ── Flag data ──────────────────────────────────────────────────────────────────
+# ── Flag data — (country_code, [accepted answers]) ────────────────────────────
+# country_code is used to build the flagcdn.com URL
 
 FLAGS: list[tuple[str, list[str]]] = [
-    ("🇺🇸", ["united states", "usa", "us", "america"]),
-    ("🇬🇧", ["united kingdom", "uk", "britain", "england"]),
-    ("🇫🇷", ["france"]),
-    ("🇩🇪", ["germany"]),
-    ("🇯🇵", ["japan"]),
-    ("🇮🇳", ["india"]),
-    ("🇧🇷", ["brazil"]),
-    ("🇨🇦", ["canada"]),
-    ("🇦🇺", ["australia"]),
-    ("🇮🇹", ["italy"]),
-    ("🇪🇸", ["spain"]),
-    ("🇲🇽", ["mexico"]),
-    ("🇳🇱", ["netherlands", "holland"]),
-    ("🇸🇦", ["saudi arabia"]),
-    ("🇰🇷", ["south korea", "korea"]),
-    ("🇨🇳", ["china"]),
-    ("🇷🇺", ["russia"]),
-    ("🇿🇦", ["south africa"]),
-    ("🇦🇷", ["argentina"]),
-    ("🇹🇷", ["turkey", "türkiye"]),
-    ("🇵🇰", ["pakistan"]),
-    ("🇳🇬", ["nigeria"]),
-    ("🇮🇩", ["indonesia"]),
-    ("🇪🇬", ["egypt"]),
-    ("🇵🇭", ["philippines"]),
-    ("🇧🇩", ["bangladesh"]),
-    ("🇸🇪", ["sweden"]),
-    ("🇳🇴", ["norway"]),
-    ("🇩🇰", ["denmark"]),
-    ("🇫🇮", ["finland"]),
-    ("🇵🇹", ["portugal"]),
-    ("🇬🇷", ["greece"]),
-    ("🇵🇱", ["poland"]),
-    ("🇨🇭", ["switzerland"]),
-    ("🇦🇹", ["austria"]),
-    ("🇧🇪", ["belgium"]),
-    ("🇮🇪", ["ireland"]),
-    ("🇳🇿", ["new zealand"]),
-    ("🇸🇬", ["singapore"]),
-    ("🇲🇾", ["malaysia"]),
-    ("🇹🇭", ["thailand"]),
-    ("🇻🇳", ["vietnam"]),
-    ("🇺🇦", ["ukraine"]),
-    ("🇮🇱", ["israel"]),
-    ("🇦🇪", ["uae", "united arab emirates"]),
-    ("🇶🇦", ["qatar"]),
-    ("🇮🇷", ["iran"]),
-    ("🇮🇶", ["iraq"]),
-    ("🇨🇴", ["colombia"]),
-    ("🇨🇱", ["chile"]),
-    ("🇵🇪", ["peru"]),
+    ("us", ["united states", "usa", "us", "america"]),
+    ("gb", ["united kingdom", "uk", "britain", "england"]),
+    ("fr", ["france"]),
+    ("de", ["germany"]),
+    ("jp", ["japan"]),
+    ("in", ["india"]),
+    ("br", ["brazil"]),
+    ("ca", ["canada"]),
+    ("au", ["australia"]),
+    ("it", ["italy"]),
+    ("es", ["spain"]),
+    ("mx", ["mexico"]),
+    ("nl", ["netherlands", "holland"]),
+    ("sa", ["saudi arabia"]),
+    ("kr", ["south korea", "korea"]),
+    ("cn", ["china"]),
+    ("ru", ["russia"]),
+    ("za", ["south africa"]),
+    ("ar", ["argentina"]),
+    ("tr", ["turkey", "türkiye"]),
+    ("pk", ["pakistan"]),
+    ("ng", ["nigeria"]),
+    ("id", ["indonesia"]),
+    ("eg", ["egypt"]),
+    ("ph", ["philippines"]),
+    ("bd", ["bangladesh"]),
+    ("se", ["sweden"]),
+    ("no", ["norway"]),
+    ("dk", ["denmark"]),
+    ("fi", ["finland"]),
+    ("pt", ["portugal"]),
+    ("gr", ["greece"]),
+    ("pl", ["poland"]),
+    ("ch", ["switzerland"]),
+    ("at", ["austria"]),
+    ("be", ["belgium"]),
+    ("ie", ["ireland"]),
+    ("nz", ["new zealand"]),
+    ("sg", ["singapore"]),
+    ("my", ["malaysia"]),
+    ("th", ["thailand"]),
+    ("vn", ["vietnam"]),
+    ("ua", ["ukraine"]),
+    ("il", ["israel"]),
+    ("ae", ["uae", "united arab emirates"]),
+    ("qa", ["qatar"]),
+    ("ir", ["iran"]),
+    ("iq", ["iraq"]),
+    ("co", ["colombia"]),
+    ("cl", ["chile"]),
+    ("pe", ["peru"]),
 ]
 
-# ── Trivia data ────────────────────────────────────────────────────────────────
+def _flag_image_url(country_code: str) -> str:
+    """Return a flagcdn.com image URL for the given 2-letter country code."""
+    return f"https://flagcdn.com/w320/{country_code.lower()}.png"
+
+
+# ── Trivia ─────────────────────────────────────────────────────────────────────
 
 TRIVIA: list[tuple[str, list[str]]] = [
     ("What planet is known as the Red Planet?",          ["mars"]),
@@ -133,7 +126,7 @@ TRIVIA: list[tuple[str, list[str]]] = [
     ("How many strings does a standard guitar have?",    ["6", "six"]),
 ]
 
-# ── Word scramble data ─────────────────────────────────────────────────────────
+# ── Scramble words ─────────────────────────────────────────────────────────────
 
 SCRAMBLE_WORDS = [
     "python", "discord", "economy", "server", "dragon", "castle",
@@ -149,40 +142,30 @@ SCRAMBLE_WORDS = [
 
 def _scramble(word: str) -> str:
     chars = list(word)
-    random.shuffle(chars)
-    # Make sure it's actually different
-    attempts = 0
-    while "".join(chars) == word and attempts < 10:
+    for _ in range(10):
         random.shuffle(chars)
-        attempts += 1
+        if "".join(chars) != word:
+            break
     return "".join(chars)
 
 
 # ── Math challenge ─────────────────────────────────────────────────────────────
 
-OPERATORS = [
-    ("+", operator.add),
-    ("-", operator.sub),
-    ("×", operator.mul),
-]
+OPERATORS = [("+", operator.add), ("-", operator.sub), ("×", operator.mul)]
 
 
 def _make_math() -> tuple[str, int]:
-    """Generate a simple two-operation arithmetic problem."""
     a = random.randint(2, 50)
     b = random.randint(2, 20)
     c = random.randint(2, 10)
     op1_sym, op1_fn = random.choice(OPERATORS)
-    op2_sym, op2_fn = random.choice(OPERATORS[:2])  # only + and - for second op to keep it readable
-
-    # Avoid negatives for subtraction
+    op2_sym, op2_fn = random.choice(OPERATORS[:2])
     if op1_sym == "-" and b > a:
         a, b = b, a
     intermediate = op1_fn(a, b)
     if op2_sym == "-" and c > intermediate:
         c = random.randint(1, max(1, intermediate))
-    answer = op2_fn(intermediate, c)
-
+    answer   = op2_fn(intermediate, c)
     question = f"**{a} {op1_sym} {b} {op2_sym} {c} = ?**"
     return question, answer
 
@@ -198,9 +181,9 @@ SEQUENCE_TYPES = [
 
 
 def _make_sequence() -> tuple[str, list[str]]:
-    base = random.randint(1, 20)
-    seq = random.choice(SEQUENCE_TYPES)(base)
-    answer = str(seq[-1])
+    base     = random.randint(1, 20)
+    seq      = random.choice(SEQUENCE_TYPES)(base)
+    answer   = str(seq[-1])
     question = f"**{'  '.join(map(str, seq[:-1]))}  ?**"
     return question, [answer]
 
@@ -208,7 +191,6 @@ def _make_sequence() -> tuple[str, list[str]]:
 # ── Active game tracker ────────────────────────────────────────────────────────
 
 class ActiveGame:
-    """Represents a running minigame in a channel."""
     def __init__(self, answers: list[str], reward: int, game_type: str):
         self.answers   = [a.lower().strip() for a in answers]
         self.reward    = reward
@@ -216,28 +198,31 @@ class ActiveGame:
         self.claimed   = False
 
 
+# ── Admin check helper ─────────────────────────────────────────────────────────
+
+def _is_admin(member: discord.Member) -> bool:
+    admin_role = getattr(config, "ADMIN_ROLE_NAME", "・Administrators")
+    return (
+        any(r.name == admin_role for r in member.roles)
+        or member.guild_permissions.administrator
+    )
+
+
 # ── Cog ────────────────────────────────────────────────────────────────────────
 
 class Minigames(commands.Cog):
-    """Auto-spawning and manual minigame commands."""
-
     def __init__(self, bot: commands.Bot) -> None:
         self.bot = bot
-        self._message_counts: dict[int, int] = {}      # channel_id -> msg count since last game
-        self._active_games: dict[int, ActiveGame] = {} # channel_id -> active game
-
-    # ── Message counter for auto-spawn ────────────────────────────────────────
+        self._message_counts: dict[int, int]    = {}
+        self._active_games:   dict[int, ActiveGame] = {}
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if message.author.bot:
-            return
-        if message.guild is None:
+        if message.author.bot or message.guild is None:
             return
 
         channel_id = message.channel.id
 
-        # Check if there's an active game and this is an answer attempt
         if channel_id in self._active_games:
             game = self._active_games[channel_id]
             if not game.claimed:
@@ -245,17 +230,28 @@ class Minigames(commands.Cog):
                 if guess in game.answers:
                     game.claimed = True
                     del self._active_games[channel_id]
-                    await db.add_wallet(message.author.id, game.reward, reason=f"minigame win: {game.game_type}")
+
+                    # Record win + streak
+                    new_streak = await db.record_mg_win(message.author.id)
                     await db.add_xp(message.author.id, config.XP_PER_COMMAND)
                     row = await db.get_user(message.author.id)
-                    embed = success_embed(
-                        f"🎉  Correct! +{fmt(game.reward)}",
-                        f"{message.author.mention} got it right!\n\nNew wallet: {fmt(row['wallet'])}",
-                    )
-                    await message.channel.send(embed=embed)
-            return  # Don't count toward auto-spawn while game is active
 
-        # Increment message counter
+                    streak_text = (
+                        f"🔥 **{new_streak}-win streak!**" if new_streak > 1
+                        else "First win — start a streak!"
+                    )
+                    embed = discord.Embed(
+                        title=f"🎉  Correct! +{fmt(game.reward)}",
+                        color=config.COLOR_SUCCESS,
+                    )
+                    embed.add_field(name="🏆 Winner",    value=message.author.mention, inline=True)
+                    embed.add_field(name="💵 Reward",    value=fmt(game.reward),       inline=True)
+                    embed.add_field(name="🔥 Streak",    value=streak_text,            inline=False)
+                    embed.add_field(name="💳 Balance",   value=fmt(row["wallet"]),     inline=True)
+                    embed.add_field(name="🎮 Total Wins",value=str(row["mg_wins"]),    inline=True)
+                    await message.channel.send(embed=embed)
+            return
+
         self._message_counts[channel_id] = self._message_counts.get(channel_id, 0) + 1
         if self._message_counts[channel_id] >= AUTO_EVERY:
             self._message_counts[channel_id] = 0
@@ -264,12 +260,10 @@ class Minigames(commands.Cog):
     # ── Game spawner ──────────────────────────────────────────────────────────
 
     async def _spawn_random_game(self, channel: discord.TextChannel):
-        """Randomly pick and run a minigame in the given channel."""
         if channel.id in self._active_games:
-            return  # already one running
+            return
 
         game_choice = random.choice(["flag", "math", "scramble", "trivia", "sequence"])
-
         difficulty_name, reward_min, reward_max = random.choice([
             ("Easy",   100, 250),
             ("Medium", 250, 500),
@@ -289,7 +283,6 @@ class Minigames(commands.Cog):
             await self._spawn_trivia(channel, reward, difficulty_name)
 
     async def _post_game(self, channel, embed: discord.Embed, answers: list[str], reward: int, game_type: str):
-        """Post the game embed and register it, then expire after timeout."""
         game = ActiveGame(answers=answers, reward=reward, game_type=game_type)
         self._active_games[channel.id] = game
         await channel.send(embed=embed)
@@ -299,23 +292,24 @@ class Minigames(commands.Cog):
         if channel.id in self._active_games and not self._active_games[channel.id].claimed:
             del self._active_games[channel.id]
             expired = discord.Embed(
-                title="⏰  Time's up!",
-                description=f"Nobody answered in time! The answer was: **{answers[0].title()}**",
+                title="⏰  Time's Up!",
+                description=f"Nobody answered in time!\nThe answer was: **{answers[0].title()}**",
                 color=config.COLOR_ERROR,
             )
             await channel.send(embed=expired)
 
     async def _spawn_flag(self, channel, reward: int, difficulty_name: str):
-        emoji, answers = random.choice(FLAGS)
+        code, answers = random.choice(FLAGS)
+        image_url = _flag_image_url(code)
         embed = discord.Embed(
             title=f"🚩  Guess the Flag! • {difficulty_name}",
             description=(
-                f"# {emoji}\n\n"
                 f"Which country does this flag belong to?\n"
-                f"First to type the correct country name wins **{fmt(reward)}**!"
+                f"First correct answer wins **{fmt(reward)}**!"
             ),
             color=0x3498DB,
         )
+        embed.set_image(url=image_url)
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, answers, reward, "flag")
 
@@ -323,25 +317,18 @@ class Minigames(commands.Cog):
         question, answer = _make_math()
         embed = discord.Embed(
             title=f"➗  Math Challenge! • {difficulty_name}",
-            description=(
-                f"Solve this: {question}\n\n"
-                f"First correct answer wins **{fmt(reward)}**!"
-            ),
+            description=f"Solve this: {question}\n\nFirst correct answer wins **{fmt(reward)}**!",
             color=0x2ECC71,
         )
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, [str(answer)], reward, "math")
 
     async def _spawn_scramble(self, channel, reward: int, difficulty_name: str):
-        word = random.choice(SCRAMBLE_WORDS)
+        word      = random.choice(SCRAMBLE_WORDS)
         scrambled = _scramble(word)
         embed = discord.Embed(
             title=f"🔤  Unscramble the Word! • {difficulty_name}",
-            description=(
-                f"**`{scrambled.upper()}`**\n\n"
-                f"Unscramble this word!\n"
-                f"First correct answer wins **{fmt(reward)}**!"
-            ),
+            description=f"**`{scrambled.upper()}`**\n\nUnscramble this word!\nFirst correct answer wins **{fmt(reward)}**!",
             color=0x9B59B6,
         )
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
@@ -351,10 +338,7 @@ class Minigames(commands.Cog):
         question, answers = random.choice(TRIVIA)
         embed = discord.Embed(
             title=f"❓  Trivia Time! • {difficulty_name}",
-            description=(
-                f"{question}\n\n"
-                f"First correct answer wins **{fmt(reward)}**!"
-            ),
+            description=f"{question}\n\nFirst correct answer wins **{fmt(reward)}**!",
             color=0xE67E22,
         )
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
@@ -363,53 +347,23 @@ class Minigames(commands.Cog):
     async def _spawn_sequence(self, channel, reward: int, difficulty_name: str):
         question, answers = _make_sequence()
         embed = discord.Embed(
-            title=f"🔢 Number Sequence • {difficulty_name}",
-            description=(
-                f"What comes next?\n{question}\n\n"
-                f"First correct answer wins **{fmt(reward)}**!"
-            ),
+            title=f"🔢  Number Sequence • {difficulty_name}",
+            description=f"What comes next?\n{question}\n\nFirst correct answer wins **{fmt(reward)}**!",
             color=0x1ABC9C,
         )
         embed.set_footer(text=f"⏳ You have {TIMEOUT} seconds!")
         await self._post_game(channel, embed, answers, reward, "sequence")
 
-    # ── Manual trigger ─────────────────────────────────────────────────────────
+    # ── .minigame (admin only) ────────────────────────────────────────────────
 
-    @commands.command(name="minigame", aliases=["mg"],
-                      help="Manually spawn a minigame in the current channel!")
-    @commands.cooldown(rate=1, per=60, type=commands.BucketType.channel)
+    @commands.command(name="minigame", aliases=["mg"])
     async def minigame(self, ctx: commands.Context):
+        if not _is_admin(ctx.author):
+            return await ctx.send(embed=error_embed("🔒 Only admins can manually trigger a minigame."))
         if ctx.channel.id in self._active_games:
-            return await ctx.send(embed=discord.Embed(
-                description="❌  There's already an active minigame in this channel!",
-                color=config.COLOR_ERROR,
-            ))
-        self._message_counts[ctx.channel.id] = 0  # reset counter
+            return await ctx.send(embed=error_embed("There's already an active minigame in this channel!"))
+        self._message_counts[ctx.channel.id] = 0
         await self._spawn_random_game(ctx.channel)
-
-    @minigame.error
-    async def minigame_error(self, ctx, error):
-        if isinstance(error, commands.CommandOnCooldown):
-            await ctx.send(embed=discord.Embed(
-                description=f"❌  Minigames can only be manually triggered once per minute per channel. Try again in **{error.retry_after:.0f}s**.",
-                color=config.COLOR_ERROR,
-            ))
-
-    # ── .minigame stats ────────────────────────────────────────────────────────
-
-    @commands.command(name="gameinfo", aliases=["gi"],
-                      help="Show info about the current minigame (if active).")
-    async def gameinfo(self, ctx: commands.Context):
-        game = self._active_games.get(ctx.channel.id)
-        if not game:
-            return await ctx.send(embed=discord.Embed(
-                description="No active minigame in this channel right now.",
-                color=config.COLOR_INFO,
-            ))
-        await ctx.send(embed=discord.Embed(
-            description=f"🎮 Active **{game.game_type}** game · Reward: **{fmt(game.reward)}**",
-            color=config.COLOR_INFO,
-        ))
 
 
 def setup(bot: commands.Bot) -> None:

@@ -1,6 +1,5 @@
 """
 config.py – Central config loader using environment variables.
-All settings are read from the .env file via python-dotenv.
 """
 
 import os
@@ -19,53 +18,57 @@ DATABASE_URL: str = os.environ["DATABASE_URL"]
 
 # ── Currency display ───────────────────────────────────────────────────────────
 CURRENCY_SYMBOL: str = "🪙"
-CURRENCY_NAME: str = "coins"
+CURRENCY_NAME: str   = "coins"
 
 # ── Gambling limits ────────────────────────────────────────────────────────────
 MIN_BET: int = 10
 MAX_BET: int = 50_000
 
 # ── Level XP thresholds ────────────────────────────────────────────────────────
-XP_PER_LEVEL: int = 500
+XP_PER_LEVEL:   int = 500
 XP_PER_COMMAND: int = 10
 
 # ── Daily reward ───────────────────────────────────────────────────────────────
-DAILY_MIN: int = 200
-DAILY_MAX: int = 800
+DAILY_MIN: int           = 200
+DAILY_MAX: int           = 800
 DAILY_COOLDOWN_HOURS: int = 22
+# Streak: +5% bonus per DAILY_STREAK_INTERVAL days of consecutive claims
+DAILY_STREAK_BONUS_PCT:  float = 5.0   # percent per interval
+DAILY_STREAK_INTERVAL:   int   = 7     # days per bonus tier
 
 # ── Hourly reward ──────────────────────────────────────────────────────────────
-HOURLY_MIN: int = 50
-HOURLY_MAX: int = 150
+HOURLY_MIN: int              = 50
+HOURLY_MAX: int              = 150
 HOURLY_COOLDOWN_MINUTES: int = 60
 
 # ── Work reward ────────────────────────────────────────────────────────────────
-WORK_MIN: int = 100
-WORK_MAX: int = 300
+WORK_MIN: int              = 100
+WORK_MAX: int              = 300
 WORK_COOLDOWN_MINUTES: int = 30
 
 # ── Side quest reward ──────────────────────────────────────────────────────────
-SIDEQUEST_MIN: int = 300
-SIDEQUEST_MAX: int = 700
+SIDEQUEST_MIN: int           = 300
+SIDEQUEST_MAX: int           = 700
 SIDEQUEST_COOLDOWN_HOURS: int = 6
 
-# ── Weekly reward (verified members only) ─────────────────────────────────────
+# ── Weekly reward ─────────────────────────────────────────────────────────────
 WEEKLY_MIN: int = 5_000
 WEEKLY_MAX: int = 15_000
 
-# ── Monthly reward (verified members only) ────────────────────────────────────
+# ── Monthly reward ────────────────────────────────────────────────────────────
 MONTHLY_MIN: int = 25_000
 MONTHLY_MAX: int = 75_000
 
-# ── Verified role name ────────────────────────────────────────────────────────
-# Change this to match the exact role name in your Discord server.
-VERIFIED_ROLE_NAME: str = "Verified"
+# ── Role names ────────────────────────────────────────────────────────────────
+# Members who have EITHER of these roles can use weekly/monthly.
+VERIFIED_ROLE_NAME: str    = "Verified"
+ADMIN_ROLE_NAME: str       = "・Administrators"
 
 # ── Minigame settings ─────────────────────────────────────────────────────────
-MINIGAME_REWARD_MIN: int = 100   # minimum coins awarded for a correct answer
-MINIGAME_REWARD_MAX: int = 500   # maximum coins awarded for a correct answer
-MINIGAME_AUTO_EVERY: int = 25    # spawn a minigame after this many messages
-MINIGAME_TIMEOUT: int    = 30    # seconds before an unanswered game expires
+MINIGAME_REWARD_MIN: int = 100
+MINIGAME_REWARD_MAX: int = 500
+MINIGAME_AUTO_EVERY: int = 25
+MINIGAME_TIMEOUT: int    = 30
 
 # ── Embed colours ─────────────────────────────────────────────────────────────
 COLOR_SUCCESS: int = 0x2ECC71
