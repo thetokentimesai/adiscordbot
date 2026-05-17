@@ -106,7 +106,7 @@ def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
     embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
     embed.add_field(
         name=f"🤖 Dealer's hand  (?)",
-        value=f"{game.dealer_cards[0][0]}{game.dealer_cards[0][1]}  🂠",
+        value=f"{game.dealer_cards[0]}  🂠",
         inline=False,
     )
     embed.add_field(
@@ -185,8 +185,7 @@ class BlackjackView(discord.ui.View):
         if self.game.player_busted:
             self._ended = True
             self._disable_all()
-            # Bet was already deducted; bust means we lose it (delta = -bet)
-            await db.add_wallet(self.player.id, -self.game.bet, reason="blackjack bust")
+            # Bet was already deducted when the game started; bust = keep nothing, add nothing
             embed = _bj_embed(self.game, Outcome.BUST, -self.game.bet)
             await interaction.response.edit_message(embed=embed, view=self)
             self.stop()
@@ -458,14 +457,14 @@ class Games(commands.Cog):
         if not await validate_bet(ctx, parsed, row["wallet"]):
             return
 
-        # Deduct bet upfront; resolve() returns a delta to add back
-        await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
+        # Bet is deducted AFTER the message sends — prevents coins vanishing on a crash
 
         game = BlackjackGame(bet=parsed)
         game.deal_initial()
 
         if game.is_natural_blackjack:
             payout = int(parsed * 1.5)
+            await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
             # Return original bet + 1.5x profit
             await db.add_wallet(user_id, parsed + payout, reason="blackjack natural")
             row   = await db.get_user(user_id)
@@ -476,6 +475,8 @@ class Games(commands.Cog):
         view = BlackjackView(game=game, player=ctx.author)
         embed = _bj_embed_playing(game)
         msg   = await ctx.send(embed=embed, view=view)
+        # Only deduct bet AFTER the message is sent — prevents losing coins on a crash
+        await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
         view.message = msg
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
 
