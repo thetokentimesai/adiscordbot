@@ -100,18 +100,34 @@ def _spin_slots() -> tuple[list[str], float]:
     return reels, 0.0
 
 
+# ── Blackjack card display ─────────────────────────────────────────────────────
+
+SUIT_EMOJI = {"♠": "♠️", "♥": "♥️", "♦": "♦️", "♣": "♣️"}
+
+def _card_str(card) -> str:
+    """Render a single card as e.g. `A♥️` `10♠️`"""
+    return f"`{card.rank}{SUIT_EMOJI[card.suit]}`"
+
+def _hand_str(cards) -> str:
+    return "  ".join(_card_str(c) for c in cards)
+
+def _hidden_hand_str(cards) -> str:
+    """Show first card + face-down card for dealer during play."""
+    return f"{_card_str(cards[0])}  `🂠`"
+
+
 # ── Blackjack embed builders ───────────────────────────────────────────────────
 
 def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
     embed = discord.Embed(title="🃏  Blackjack", color=config.COLOR_INFO)
     embed.add_field(
-        name=f"🤖 Dealer's hand  (?)",
-        value=f"{game.dealer_cards[0]}  🂠",
+        name=f"🤖 Dealer  (?)",
+        value=_hidden_hand_str(game.dealer_cards),
         inline=False,
     )
     embed.add_field(
-        name=f"👤 Your hand  ({game.player_total})",
-        value=cards_str(game.player_cards),
+        name=f"👤 You  ({game.player_total})",
+        value=_hand_str(game.player_cards),
         inline=False,
     )
     embed.set_footer(text=f"Bet: {fmt(game.bet)}  •  Hit or Stand?")
@@ -120,32 +136,33 @@ def _bj_embed_playing(game: BlackjackGame) -> discord.Embed:
 
 def _bj_embed(game: BlackjackGame, outcome: Outcome, delta: int, timed_out: bool = False) -> discord.Embed:
     labels = {
-        Outcome.PLAYER_WIN: ("✅  You Win!",      config.COLOR_SUCCESS),
-        Outcome.DEALER_WIN: ("❌  Dealer Wins!",  config.COLOR_ERROR),
-        Outcome.PUSH:       ("🤝  Push — Tie!",   config.COLOR_INFO),
-        Outcome.BLACKJACK:  ("🎉  BLACKJACK!",    config.COLOR_GOLD),
-        Outcome.BUST:       ("💥  You Bust!",     config.COLOR_ERROR),
+        Outcome.PLAYER_WIN: ("🎉  YOU WON",     config.COLOR_SUCCESS),
+        Outcome.DEALER_WIN: ("❌  Dealer Wins", config.COLOR_ERROR),
+        Outcome.PUSH:       ("🤝  Push — Tie",  config.COLOR_INFO),
+        Outcome.BLACKJACK:  ("🎉  BLACKJACK!",  config.COLOR_GOLD),
+        Outcome.BUST:       ("💥  You Bust!",   config.COLOR_ERROR),
     }
-    title, color = labels[outcome]
+    result_label, color = labels[outcome]
     if timed_out:
-        title = f"⏰ Timed Out — {title}"
+        result_label = f"⏰ Timed Out"
 
-    embed = discord.Embed(title=title, color=color)
+    embed = discord.Embed(title="🃏  Blackjack", color=color)
     embed.add_field(
         name=f"🤖 Dealer  ({game.dealer_total})",
-        value=cards_str(game.dealer_cards),
+        value=_hand_str(game.dealer_cards),
         inline=False,
     )
     embed.add_field(
         name=f"👤 You  ({game.player_total})",
-        value=cards_str(game.player_cards),
+        value=_hand_str(game.player_cards),
         inline=False,
     )
-    embed.add_field(name="━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
+    embed.add_field(name="━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
 
     sign = "+" if delta > 0 else ""
-    embed.add_field(name="📊 Result",  value=title.split("—")[0].strip() if "—" in title else title, inline=True)
-    embed.add_field(name="💵 Earned",  value=f"{sign}{fmt(delta)}" if delta != 0 else "—",           inline=True)
+    earned_str = f"{sign}{fmt(delta)}" if delta != 0 else "—"
+    embed.add_field(name="📊 Result",  value=result_label,  inline=True)
+    embed.add_field(name="💰 Earned",  value=earned_str,    inline=True)
     embed.set_footer(text=f"Bet: {fmt(game.bet)}")
     return embed
 
@@ -171,8 +188,12 @@ class BlackjackView(discord.ui.View):
             self._ended = True
             self._disable_all()
             outcome, delta = self.game.resolve()
-            await db.add_wallet(self.player.id, delta, reason="blackjack timeout stand")
+            payout = self.game.bet + delta
+            if payout > 0:
+                await db.add_wallet(self.player.id, payout, reason="blackjack timeout stand")
+            row   = await db.get_user(self.player.id)
             embed = _bj_embed(self.game, outcome, delta, timed_out=True)
+            embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
             await self.message.edit(embed=embed, view=self)
 
     def _disable_all(self) -> None:
@@ -186,7 +207,10 @@ class BlackjackView(discord.ui.View):
             self._ended = True
             self._disable_all()
             # Bet was already deducted when the game started; bust = keep nothing, add nothing
+            await db.add_xp(self.player.id, config.XP_PER_COMMAND)
+            row   = await db.get_user(self.player.id)
             embed = _bj_embed(self.game, Outcome.BUST, -self.game.bet)
+            embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
             await interaction.response.edit_message(embed=embed, view=self)
             self.stop()
         else:
@@ -198,8 +222,17 @@ class BlackjackView(discord.ui.View):
         self._ended = True
         self._disable_all()
         outcome, delta = self.game.resolve()
-        await db.add_wallet(self.player.id, delta, reason=f"blackjack {outcome.name.lower()}")
+        # Bet was deducted upfront. payout = stake_back + profit:
+        #   Win:  bet + bet  = 2× bet credited back
+        #   Push: bet + 0    = stake returned
+        #   Loss: bet + -bet = 0 (nothing credited, already gone)
+        payout = self.game.bet + delta
+        if payout > 0:
+            await db.add_wallet(self.player.id, payout, reason=f"blackjack {outcome.name.lower()}")
+        await db.add_xp(self.player.id, config.XP_PER_COMMAND)
+        row   = await db.get_user(self.player.id)
         embed = _bj_embed(self.game, outcome, delta)
+        embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
         await interaction.response.edit_message(embed=embed, view=self)
         self.stop()
 
@@ -463,10 +496,11 @@ class Games(commands.Cog):
         game.deal_initial()
 
         if game.is_natural_blackjack:
-            payout = int(parsed * 1.5)
+            # Natural blackjack (A + 10-value on deal) → 2.5x payout
+            payout = int(parsed * 2.5)
             await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
-            # Return original bet + 1.5x profit
             await db.add_wallet(user_id, parsed + payout, reason="blackjack natural")
+            await db.add_xp(user_id, config.XP_PER_COMMAND)
             row   = await db.get_user(user_id)
             embed = _bj_embed(game, Outcome.BLACKJACK, payout)
             embed.add_field(name="💳 Balance", value=fmt(row["wallet"]), inline=True)
@@ -479,6 +513,7 @@ class Games(commands.Cog):
         await db.add_wallet(user_id, -parsed, reason="blackjack bet placed")
         view.message = msg
         set_cooldown(user_id, "gamble", GAMBLE_COOLDOWN)
+        await db.add_xp(user_id, config.XP_PER_COMMAND)
 
     # ── .horserace ─────────────────────────────────────────────────────────────
 
