@@ -22,7 +22,7 @@ CURRENCY_NAME: str   = "coins"
 
 # ── Gambling limits ────────────────────────────────────────────────────────────
 MIN_BET: int = 10
-MAX_BET: int = 50_000
+MAX_BET: int = 500_000
 
 # ── Level XP thresholds ────────────────────────────────────────────────────────
 XP_PER_LEVEL:   int = 500
