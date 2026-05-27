@@ -31,10 +31,12 @@ async def validate_bet(
     ctx,
     amount: int,
     wallet: int,
+    is_admin: bool = False,
 ) -> bool:
     """
     Send an error message and return False if the bet is invalid.
     Returns True when the bet is okay.
+    Admins bypass the MAX_BET cap.
     """
     from config import MIN_BET, MAX_BET
 
@@ -50,7 +52,7 @@ async def validate_bet(
         )
         return False
 
-    if amount > MAX_BET:
+    if not is_admin and amount > MAX_BET:
         await ctx.send(
             embed=error_embed(f"Maximum bet is {fmt(MAX_BET)}.")
         )
