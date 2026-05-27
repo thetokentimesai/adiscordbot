@@ -683,8 +683,8 @@ class Economy(commands.Cog):
     async def slash_addmoney(
         self,
         ctx: discord.ApplicationContext,
-        member: discord.Option(discord.Member, "Target user"),
-        amount: discord.Option(int, "Amount to add (use a negative number to remove)"),
+        member: discord.Member,
+        amount: int,
     ):
         if not _is_admin(ctx.author):
             return await ctx.respond(
