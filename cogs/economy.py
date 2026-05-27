@@ -8,8 +8,6 @@ Commands: .balance/.bal, .wallet/.w, .daily/.dy, .hourly/.hr,
           .addmoney (admin), .leaderboard/.lb, .rank
 """
 
-from __future__ import annotations
-
 import random
 from datetime import datetime, timezone, timedelta
 
