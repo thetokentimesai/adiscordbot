@@ -492,7 +492,7 @@ class Economy(commands.Cog):
 
     # ── .send / .pay ───────────────────────────────────────────────────────────
 
-    @commands.command(name="send", aliases=["pay"])
+    @commands.command(name="send", aliases=["pay", "give"])
     async def send(self, ctx: commands.Context, member: discord.Member = None, amount: str = None):
         if member is None or amount is None:
             return await ctx.send(embed=error_embed("Usage: `.send @user <amount>`"))
@@ -651,7 +651,7 @@ class Economy(commands.Cog):
 
     # ── .addmoney (admin only) ─────────────────────────────────────────────────
 
-    @commands.command(name="addmoney", aliases=["give", "addcoins"])
+    @commands.command(name="addmoney")
     async def addmoney(self, ctx: commands.Context, member: discord.Member = None, amount: str = None):
         if not _is_admin(ctx.author):
             return await ctx.send(embed=error_embed("🔒 This command is for admins only."))
@@ -673,6 +673,56 @@ class Economy(commands.Cog):
         embed.add_field(name="👛 New Wallet", value=fmt(row["wallet"]), inline=True)
         embed.set_footer(text=f"Action by {ctx.author.display_name}")
         await ctx.send(embed=embed)
+
+    # ── /addmoney (slash, admin only, ephemeral) ───────────────────────────────
+
+    @discord.slash_command(
+        name="addmoney",
+        description="Admin: add or remove coins from a user's wallet or bank",
+    )
+    async def slash_addmoney(
+        self,
+        ctx: discord.ApplicationContext,
+        member: discord.Option(discord.Member, "Target user"),
+        amount: discord.Option(int, "Amount to add (use a negative number to remove)"),
+        location: discord.Option(
+            str,
+            "Where to apply the change",
+            choices=["wallet", "bank"],
+            required=False,
+        ) = "wallet",
+    ):
+        if not _is_admin(ctx.author):
+            return await ctx.respond(
+                embed=error_embed("🔒 This command is for admins only."), ephemeral=True
+            )
+
+        await db.ensure_user(member.id)
+        if location == "bank":
+            await db.execute(
+                "UPDATE users SET bank = GREATEST(0, bank + $1) WHERE user_id = $2",
+                (amount, member.id),
+            )
+            if amount:
+                await db.execute(
+                    "INSERT INTO transactions (user_id, amount, reason) VALUES ($1, $2, $3)",
+                    (member.id, amount, f"admin addmoney (bank) by {ctx.author.id}"),
+                )
+        else:
+            await db.add_wallet(member.id, amount, reason=f"admin addmoney by {ctx.author.id}")
+
+        row = await db.get_user(member.id)
+        action = "Added to" if amount >= 0 else "Removed from"
+        loc_emoji = "🏦" if location == "bank" else "👛"
+        embed = discord.Embed(
+            title=f"🛠️  Admin: {action} {location.capitalize()}",
+            color=config.COLOR_SUCCESS if amount >= 0 else config.COLOR_ERROR,
+        )
+        embed.add_field(name="👤 User",                           value=member.mention,      inline=True)
+        embed.add_field(name="💵 Amount",                         value=fmt(abs(amount)),    inline=True)
+        embed.add_field(name=f"{loc_emoji} New {location.capitalize()}", value=fmt(row[location]), inline=True)
+        embed.set_footer(text=f"Action by {ctx.author.display_name}")
+        await ctx.respond(embed=embed, ephemeral=True)
 
     # ── .leaderboard ───────────────────────────────────────────────────────────
 
