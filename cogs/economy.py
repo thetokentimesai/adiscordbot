@@ -685,42 +685,22 @@ class Economy(commands.Cog):
         ctx: discord.ApplicationContext,
         member: discord.Option(discord.Member, "Target user"),
         amount: discord.Option(int, "Amount to add (use a negative number to remove)"),
-        location: discord.Option(
-            str,
-            "Where to apply the change",
-            choices=["wallet", "bank"],
-            default="wallet",
-        ),
     ):
         if not _is_admin(ctx.author):
             return await ctx.respond(
                 embed=error_embed("🔒 This command is for admins only."), ephemeral=True
             )
 
-        await db.ensure_user(member.id)
-        if location == "bank":
-            await db.execute(
-                "UPDATE users SET bank = GREATEST(0, bank + $1) WHERE user_id = $2",
-                (amount, member.id),
-            )
-            if amount:
-                await db.execute(
-                    "INSERT INTO transactions (user_id, amount, reason) VALUES ($1, $2, $3)",
-                    (member.id, amount, f"admin addmoney (bank) by {ctx.author.id}"),
-                )
-        else:
-            await db.add_wallet(member.id, amount, reason=f"admin addmoney by {ctx.author.id}")
-
+        await db.add_wallet(member.id, amount, reason=f"admin addmoney by {ctx.author.id}")
         row = await db.get_user(member.id)
-        action = "Added to" if amount >= 0 else "Removed from"
-        loc_emoji = "🏦" if location == "bank" else "👛"
+        action = "Added" if amount >= 0 else "Removed"
         embed = discord.Embed(
-            title=f"🛠️  Admin: {action} {location.capitalize()}",
+            title=f"🛠️  Admin: {action} Coins",
             color=config.COLOR_SUCCESS if amount >= 0 else config.COLOR_ERROR,
         )
-        embed.add_field(name="👤 User",                           value=member.mention,      inline=True)
-        embed.add_field(name="💵 Amount",                         value=fmt(abs(amount)),    inline=True)
-        embed.add_field(name=f"{loc_emoji} New {location.capitalize()}", value=fmt(row[location]), inline=True)
+        embed.add_field(name="👤 User",       value=member.mention,     inline=True)
+        embed.add_field(name="💵 Amount",     value=fmt(abs(amount)),   inline=True)
+        embed.add_field(name="👛 New Wallet", value=fmt(row["wallet"]), inline=True)
         embed.set_footer(text=f"Action by {ctx.author.display_name}")
         await ctx.respond(embed=embed, ephemeral=True)
 
