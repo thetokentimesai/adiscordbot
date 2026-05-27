@@ -25,6 +25,15 @@ from utils.blackjack import BlackjackGame, Outcome, cards_str
 
 from datetime import datetime, timezone
 
+
+def _is_admin(member: discord.Member) -> bool:
+    admin_role = getattr(config, "ADMIN_ROLE_NAME", "・Administrators")
+    return (
+        any(r.name == admin_role for r in member.roles)
+        or member.guild_permissions.administrator
+    )
+
+
 GAMBLE_COOLDOWN  = 5
 RACE_BUY_IN      = 500
 RACE_JOIN_TIME   = 30
@@ -336,7 +345,7 @@ class Games(commands.Cog):
         amount = parse_bet(amount_str, row["wallet"])
         if amount is None:
             return await ctx.send(embed=error_embed("Invalid amount."))
-        if not await validate_bet(ctx, amount, row["wallet"]):
+        if not await validate_bet(ctx, amount, row["wallet"], is_admin=_is_admin(ctx.author)):
             return
 
         # ── 2-second suspense reveal ───────────────────────────────────────────
@@ -396,7 +405,7 @@ class Games(commands.Cog):
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
             return await ctx.send(embed=error_embed("Invalid amount."))
-        if not await validate_bet(ctx, parsed, row["wallet"]):
+        if not await validate_bet(ctx, parsed, row["wallet"], is_admin=_is_admin(ctx.author)):
             return
 
         reels, multiplier = _spin_slots()
@@ -444,7 +453,7 @@ class Games(commands.Cog):
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
             return await ctx.send(embed=error_embed("Invalid amount."))
-        if not await validate_bet(ctx, parsed, row["wallet"]):
+        if not await validate_bet(ctx, parsed, row["wallet"], is_admin=_is_admin(ctx.author)):
             return
 
         player_roll = random.randint(1, 6)
@@ -490,7 +499,7 @@ class Games(commands.Cog):
         parsed = parse_bet(amount, row["wallet"])
         if parsed is None:
             return await ctx.send(embed=error_embed("Invalid amount."))
-        if not await validate_bet(ctx, parsed, row["wallet"]):
+        if not await validate_bet(ctx, parsed, row["wallet"], is_admin=_is_admin(ctx.author)):
             return
 
         # Bet is deducted AFTER the message sends — prevents coins vanishing on a crash
