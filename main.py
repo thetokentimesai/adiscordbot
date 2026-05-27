@@ -17,6 +17,7 @@ bot = commands.Bot(
     command_prefix=".",
     intents=intents,
     help_command=None,
+    debug_guilds=[config.ALLOWED_GUILD_ID],
 )
 
 
