@@ -168,6 +168,11 @@ async def on_ready():
         print("Database initialized.")
     except Exception as e:
         print(f"Database init error: {e}")
+    try:
+        await bot.sync_commands()
+        print("Slash commands synced.")
+    except Exception as e:
+        print(f"Slash command sync error: {e}")
 
 
 # ── Cogs ───────────────────────────────────────────────────────────────────────
