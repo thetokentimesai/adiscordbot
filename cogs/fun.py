@@ -103,7 +103,7 @@ class Fun(commands.Cog):
 
     # ── .gaybar ────────────────────────────────────────────────────────────────
 
-    @commands.command(name="gaybar", help="Check someone's gay % this week 🌈")
+    @commands.command(name="gaybar", aliases=["gay"], help="Check someone's gay % this week 🌈")
     async def gaybar(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = gaybar_percent(target.id)
@@ -122,7 +122,7 @@ class Fun(commands.Cog):
 
     # ── .susmeter ──────────────────────────────────────────────────────────────
 
-    @commands.command(name="susmeter", help="How sus is this person? 📣")
+    @commands.command(name="susmeter", aliases=["sus"], help="How sus is this person? 📣")
     async def susmeter(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = susmeter_percent(target.id)
@@ -141,7 +141,7 @@ class Fun(commands.Cog):
 
     # ── .nerdrate ──────────────────────────────────────────────────────────────
 
-    @commands.command(name="nerdrate", help="How nerdy is this person? 🤓")
+    @commands.command(name="nerdrate", aliases=["nerd"], help="How nerdy is this person? 🤓")
     async def nerdrate(self, ctx: commands.Context, user: discord.Member = None):
         target  = user or ctx.author
         percent = nerdrate_percent(target.id)
