@@ -689,8 +689,8 @@ class Economy(commands.Cog):
             str,
             "Where to apply the change",
             choices=["wallet", "bank"],
-            required=False,
-        ) = "wallet",
+            default="wallet",
+        ),
     ):
         if not _is_admin(ctx.author):
             return await ctx.respond(
